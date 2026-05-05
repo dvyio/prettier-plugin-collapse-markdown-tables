@@ -1,0 +1,55 @@
+# @fileoverview Checks package tests, formatting, and release contents in CI.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Node ${{ matrix.node }} / Prettier ${{ matrix.prettier }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node:
+          - 22.x
+          - 24.x
+        prettier:
+          - lockfile
+          - latest-3
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install latest Prettier 3.x
+        if: matrix.prettier == 'latest-3'
+        run: npm install --no-save --package-lock=false --ignore-scripts prettier@^3
+
+      - name: Run release checks
+        if: matrix.node == '22.x' && matrix.prettier == 'lockfile'
+        run: npm run check:release
+
+      - name: Run checks
+        if: matrix.node != '22.x' || matrix.prettier != 'lockfile'
+        run: npm run check
+
+      - name: Check package dry run
+        if: matrix.node != '22.x' || matrix.prettier != 'lockfile'
+        run: npm run pack:check

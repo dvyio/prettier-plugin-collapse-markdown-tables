@@ -1,0 +1,10 @@
+dist/
+node_modules/
+coverage/
+.stryker-tmp/
+.dist-build-*/
+.dist-previous-*/
+.dist-swap.lock/
+
+# Husky internals
+/.husky/_

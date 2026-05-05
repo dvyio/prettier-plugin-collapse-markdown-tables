@@ -1,0 +1,9 @@
+dist/
+node_modules/
+coverage/
+.stryker-tmp/
+README.md
+CONTRIBUTING.md
+SECURITY.md
+tests/fixtures/
+tests/dogfood/

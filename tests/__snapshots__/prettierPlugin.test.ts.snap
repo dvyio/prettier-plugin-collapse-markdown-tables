@@ -1,0 +1,504 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`prettier plugin > given code and escaped pipe fixture text, when normalizing directly, then output matches snapshots and stays stable 1`] = `
+"| Pattern | Meaning |
+| --- | --- |
+| \`foo | bar\` | code pipe |
+| \`foo  |  bar\` | padded code pipe |
+| \`foo	|	bar\` | tabbed code pipe |
+| foo\\|bar | escaped pipe |
+"
+`;
+
+exports[`prettier plugin > given code and escaped pipe fixture text, when normalizing directly, then output matches snapshots and stays stable 2`] = `
+"|Pattern|Meaning|
+|---|---|
+|\`foo | bar\`|code pipe|
+|\`foo  |  bar\`|padded code pipe|
+|\`foo	|	bar\`|tabbed code pipe|
+|foo\\|bar|escaped pipe|
+"
+`;
+
+exports[`prettier plugin > given markdown-contexts.md and compact style, when formatting, then output matches the fixture snapshot and stays stable 1`] = `
+"---
+title: Markdown fixture
+table: |
+  | Front  | Matter |
+  | ------ | ------ |
+  | keep   | this   |
+---
+
+This paragraph is not a table | even with a pipe.
+--- | not a delimiter
+Still prose | not a row.
+
+|Name|Role|
+|---|---|
+|Davey|Builder|
+|Codex|Pair worker|
+
+- Team
+  |Name|Role|
+  |---|---|
+  |Davey|Builder|
+
+> |Quote|Value|
+> |---|---|
+> |A|B|
+
+> - Nested
+>   |Name|Role|
+>   |---|---|
+>   |Davey|Builder|
+
+<!-- prettier-ignore -->
+| Wide  | Table       |
+| ----- | ----------- |
+| keep  | this        |
+
+<!-- prettier-ignore-start -->
+| Wide  | Table       |
+| ----- | ----------- |
+| keep  | this        |
+<!-- prettier-ignore-end -->
+
+\`\`\`text
+| Code  | Meaning |
+| ----- | ------- |
+| a     | b       |
+\`\`\`
+
+    | Code  | Meaning |
+    | ----- | ------- |
+    | a     | b       |
+
+<!--
+| Comment | Meaning |
+| ------- | ------- |
+| a       | b       |
+-->
+
+<pre>
+| Html  | Meaning |
+| ----- | ------- |
+| a     | b       |
+</pre>
+
+|Broken|
+|---|
+|no change|
+"
+`;
+
+exports[`prettier plugin > given markdown-contexts.md and prettier style, when formatting, then output matches the fixture snapshot and stays stable 1`] = `
+"---
+title: Markdown fixture
+table: |
+  | Front  | Matter |
+  | ------ | ------ |
+  | keep   | this   |
+---
+
+This paragraph is not a table | even with a pipe.
+--- | not a delimiter
+Still prose | not a row.
+
+| Name  | Role        |
+| ----- | ----------- |
+| Davey | Builder     |
+| Codex | Pair worker |
+
+- Team
+  | Name | Role |
+  | ----- | ----------- |
+  | Davey | Builder |
+
+> | Quote | Value |
+> | ----- | ----- |
+> | A     | B     |
+
+> - Nested
+>   | Name | Role |
+>   | ----- | ----------- |
+>   | Davey | Builder |
+
+<!-- prettier-ignore -->
+| Wide  | Table       |
+| ----- | ----------- |
+| keep  | this        |
+
+<!-- prettier-ignore-start -->
+| Wide  | Table       |
+| ----- | ----------- |
+| keep  | this        |
+<!-- prettier-ignore-end -->
+
+\`\`\`text
+| Code  | Meaning |
+| ----- | ------- |
+| a     | b       |
+\`\`\`
+
+    | Code  | Meaning |
+    | ----- | ------- |
+    | a     | b       |
+
+<!--
+| Comment | Meaning |
+| ------- | ------- |
+| a       | b       |
+-->
+
+<pre>
+| Html  | Meaning |
+| ----- | ------- |
+| a     | b       |
+</pre>
+
+| Broken    |
+| --------- |
+| no change |
+"
+`;
+
+exports[`prettier plugin > given markdown-contexts.md and spaced style, when formatting, then output matches the fixture snapshot and stays stable 1`] = `
+"---
+title: Markdown fixture
+table: |
+  | Front  | Matter |
+  | ------ | ------ |
+  | keep   | this   |
+---
+
+This paragraph is not a table | even with a pipe.
+--- | not a delimiter
+Still prose | not a row.
+
+| Name | Role |
+| --- | --- |
+| Davey | Builder |
+| Codex | Pair worker |
+
+- Team
+  | Name | Role |
+  | --- | --- |
+  | Davey | Builder |
+
+> | Quote | Value |
+> | --- | --- |
+> | A | B |
+
+> - Nested
+>   | Name | Role |
+>   | --- | --- |
+>   | Davey | Builder |
+
+<!-- prettier-ignore -->
+| Wide  | Table       |
+| ----- | ----------- |
+| keep  | this        |
+
+<!-- prettier-ignore-start -->
+| Wide  | Table       |
+| ----- | ----------- |
+| keep  | this        |
+<!-- prettier-ignore-end -->
+
+\`\`\`text
+| Code  | Meaning |
+| ----- | ------- |
+| a     | b       |
+\`\`\`
+
+    | Code  | Meaning |
+    | ----- | ------- |
+    | a     | b       |
+
+<!--
+| Comment | Meaning |
+| ------- | ------- |
+| a       | b       |
+-->
+
+<pre>
+| Html  | Meaning |
+| ----- | ------- |
+| a     | b       |
+</pre>
+
+| Broken |
+| --- |
+| no change |
+"
+`;
+
+exports[`prettier plugin > given mdx-contexts.mdx and compact style, when formatting, then output matches the fixture snapshot and stays stable 1`] = `
+"import Demo from "./Demo";
+
+export const sample = \`
+| Code  | Meaning |
+| ----- | ------- |
+| a     | b       |
+\`;
+
+import Fixture from "./Fixture";
+
+export const semicolonless = \`
+| Code  | Meaning |
+| ----- | ------- |
+| a     | b       |
+\`;
+
+<Demo>{\`
+| Code  | Meaning |
+| ----- | ------- |
+| a     | b       |
+\`}</Demo>
+
+<Demo.Root>
+  <Demo.Panel>| Code | Meaning | | ----- | ------- | | a | b |</Demo.Panel>
+</Demo.Root>
+
+<Demo.Root>
+  <Demo.Panel
+    label="literal /> text"
+    data={{
+      closing: "/>",
+    }}
+  >
+
+    | Code  | Meaning |
+    | ----- | ------- |
+    | a     | b       |
+
+  </Demo.Panel>
+</Demo.Root>
+
+<Example
+  label="literal /> text"
+  data={{
+    closing: "/>",
+  }}
+>
+
+| Code | Meaning |
+| ---- | ------- |
+| a    | b       |
+
+</Example>
+
+<Demo>
+  {() => "</Demo>"}
+  {/** </Demo> */}
+  {/<\\/Demo>/.test(value) ? \`</Demo>\` : null}
+
+| Code | Meaning |
+| ---- | ------- |
+| a    | b       |
+
+</Demo>
+
+<docs:Panel>
+| Code | Meaning |
+| ----- | ------- |
+| a | b |
+</docs:Panel>
+
+<my-widget>| Code | Meaning | | ----- | ------- | | a | b |</my-widget>
+
+<pre>| Code | Meaning | | ----- | ------- | | a | b |</pre>
+
+<code>| Code | Meaning | | ----- | ------- | | a | b |</code>
+
+# MDX Table
+
+|Name|Role|
+|---|---|
+|Davey|Builder|
+
+> |Quote|Value|
+> |---|---|
+> |A|B|
+"
+`;
+
+exports[`prettier plugin > given mdx-contexts.mdx and prettier style, when formatting, then output matches the fixture snapshot and stays stable 1`] = `
+"import Demo from "./Demo";
+
+export const sample = \`
+| Code  | Meaning |
+| ----- | ------- |
+| a     | b       |
+\`;
+
+import Fixture from "./Fixture";
+
+export const semicolonless = \`
+| Code  | Meaning |
+| ----- | ------- |
+| a     | b       |
+\`;
+
+<Demo>{\`
+| Code  | Meaning |
+| ----- | ------- |
+| a     | b       |
+\`}</Demo>
+
+<Demo.Root>
+  <Demo.Panel>| Code | Meaning | | ----- | ------- | | a | b |</Demo.Panel>
+</Demo.Root>
+
+<Demo.Root>
+  <Demo.Panel
+    label="literal /> text"
+    data={{
+      closing: "/>",
+    }}
+  >
+
+    | Code  | Meaning |
+    | ----- | ------- |
+    | a     | b       |
+
+  </Demo.Panel>
+</Demo.Root>
+
+<Example
+  label="literal /> text"
+  data={{
+    closing: "/>",
+  }}
+>
+
+| Code | Meaning |
+| ---- | ------- |
+| a    | b       |
+
+</Example>
+
+<Demo>
+  {() => "</Demo>"}
+  {/** </Demo> */}
+  {/<\\/Demo>/.test(value) ? \`</Demo>\` : null}
+
+| Code | Meaning |
+| ---- | ------- |
+| a    | b       |
+
+</Demo>
+
+<docs:Panel>
+| Code | Meaning |
+| ----- | ------- |
+| a | b |
+</docs:Panel>
+
+<my-widget>| Code | Meaning | | ----- | ------- | | a | b |</my-widget>
+
+<pre>| Code | Meaning | | ----- | ------- | | a | b |</pre>
+
+<code>| Code | Meaning | | ----- | ------- | | a | b |</code>
+
+# MDX Table
+
+| Name  | Role    |
+| ----- | ------- |
+| Davey | Builder |
+
+> | Quote | Value |
+> | ----- | ----- |
+> | A     | B     |
+"
+`;
+
+exports[`prettier plugin > given mdx-contexts.mdx and spaced style, when formatting, then output matches the fixture snapshot and stays stable 1`] = `
+"import Demo from "./Demo";
+
+export const sample = \`
+| Code  | Meaning |
+| ----- | ------- |
+| a     | b       |
+\`;
+
+import Fixture from "./Fixture";
+
+export const semicolonless = \`
+| Code  | Meaning |
+| ----- | ------- |
+| a     | b       |
+\`;
+
+<Demo>{\`
+| Code  | Meaning |
+| ----- | ------- |
+| a     | b       |
+\`}</Demo>
+
+<Demo.Root>
+  <Demo.Panel>| Code | Meaning | | ----- | ------- | | a | b |</Demo.Panel>
+</Demo.Root>
+
+<Demo.Root>
+  <Demo.Panel
+    label="literal /> text"
+    data={{
+      closing: "/>",
+    }}
+  >
+
+    | Code  | Meaning |
+    | ----- | ------- |
+    | a     | b       |
+
+  </Demo.Panel>
+</Demo.Root>
+
+<Example
+  label="literal /> text"
+  data={{
+    closing: "/>",
+  }}
+>
+
+| Code | Meaning |
+| ---- | ------- |
+| a    | b       |
+
+</Example>
+
+<Demo>
+  {() => "</Demo>"}
+  {/** </Demo> */}
+  {/<\\/Demo>/.test(value) ? \`</Demo>\` : null}
+
+| Code | Meaning |
+| ---- | ------- |
+| a    | b       |
+
+</Demo>
+
+<docs:Panel>
+| Code | Meaning |
+| ----- | ------- |
+| a | b |
+</docs:Panel>
+
+<my-widget>| Code | Meaning | | ----- | ------- | | a | b |</my-widget>
+
+<pre>| Code | Meaning | | ----- | ------- | | a | b |</pre>
+
+<code>| Code | Meaning | | ----- | ------- | | a | b |</code>
+
+# MDX Table
+
+| Name | Role |
+| --- | --- |
+| Davey | Builder |
+
+> | Quote | Value |
+> | --- | --- |
+> | A | B |
+"
+`;

@@ -1,0 +1,101 @@
+import Demo from './Demo';
+
+export const sample = `
+| Code  | Meaning |
+| ----- | ------- |
+| a     | b       |
+`;
+
+import Fixture from './Fixture'
+
+export const semicolonless = `
+| Code  | Meaning |
+| ----- | ------- |
+| a     | b       |
+`
+
+<Demo>{`
+| Code  | Meaning |
+| ----- | ------- |
+| a     | b       |
+`}</Demo>
+
+<Demo.Root>
+  <Demo.Panel>
+    | Code  | Meaning |
+    | ----- | ------- |
+    | a     | b       |
+  </Demo.Panel>
+</Demo.Root>
+
+<Demo.Root>
+  <Demo.Panel
+    label="literal /> text"
+    data={{
+      closing: "/>",
+    }}
+  >
+
+    | Code  | Meaning |
+    | ----- | ------- |
+    | a     | b       |
+
+  </Demo.Panel>
+</Demo.Root>
+
+<Example
+  label="literal /> text"
+  data={{
+    closing: "/>",
+  }}
+>
+
+| Code  | Meaning |
+| ----- | ------- |
+| a     | b       |
+
+</Example>
+
+<Demo>
+  {() => "</Demo>"}
+  {/** </Demo> */}
+  {/<\/Demo>/.test(value) ? `</Demo>` : null}
+
+  | Code  | Meaning |
+  | ----- | ------- |
+  | a     | b       |
+</Demo>
+
+<docs:Panel>
+| Code  | Meaning |
+| ----- | ------- |
+| a     | b       |
+</docs:Panel>
+
+<my-widget>
+| Code  | Meaning |
+| ----- | ------- |
+| a     | b       |
+</my-widget>
+
+<pre>
+| Code  | Meaning |
+| ----- | ------- |
+| a     | b       |
+</pre>
+
+<code>
+| Code  | Meaning |
+| ----- | ------- |
+| a     | b       |
+</code>
+
+# MDX Table
+
+| Name  | Role    |
+| ----- | ------- |
+| Davey | Builder |
+
+> | Quote | Value |
+> | ----- | ----- |
+> | A     | B     |
