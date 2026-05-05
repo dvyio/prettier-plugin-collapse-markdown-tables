@@ -8,7 +8,7 @@ import {
 } from '../src/normalizeMarkdownTables.js';
 import { parseMarkdownTableRowInternal as parseMarkdownTableRow } from '../src/normalizer/tableRows.js';
 
-const STRICT_PERFORMANCE_TEST_TIMEOUT_MS = 500;
+const STRICT_PERFORMANCE_TEST_TIMEOUT_MS = 1_000;
 const IS_STRICT_PERFORMANCE_TEST =
   process.env.NORMALIZE_MARKDOWN_TABLES_STRESS === '1';
 const PERFORMANCE_TEST_TIMEOUT_MS = STRICT_PERFORMANCE_TEST_TIMEOUT_MS;

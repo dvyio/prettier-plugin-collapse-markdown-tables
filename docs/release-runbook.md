@@ -49,7 +49,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The publish job runs `npm publish --access public --provenance`. npm runs the `prepublishOnly` release gate before it publishes.
+The publish job builds the package, then runs `npm publish --access public --ignore-scripts --provenance`. Push the tag only after `main` has passed the release gate.
 
 If the workflow fails with `ENEEDAUTH`, confirm the `NPM_TOKEN` secret exists, has publish access, and has not expired.
 
@@ -66,7 +66,7 @@ Then:
 
 1. Revoke the temporary npm automation token.
 2. Remove the `NPM_TOKEN` GitHub Actions secret.
-3. Change the publish workflow back to tokenless `npm publish --access public`.
+3. Change the publish workflow back to tokenless `npm publish --access public --ignore-scripts`.
 4. In npm package settings, require two-factor authentication and disallow tokens.
 
 Trusted publishing uses GitHub OIDC, so future publish jobs do not need `NPM_TOKEN`. npm creates provenance for public packages from public GitHub repositories.
