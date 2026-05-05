@@ -1,0 +1,117 @@
+{
+  "name": "@dvyio/prettier-plugin-collapse-markdown-tables",
+  "version": "0.1.0",
+  "description": "Prettier plugin that collapses Markdown table padding.",
+  "keywords": [
+    "formatting",
+    "markdown",
+    "markdown-tables",
+    "prettier",
+    "prettier-plugin",
+    "tables"
+  ],
+  "homepage": "https://github.com/dvyio/prettier-plugin-collapse-markdown-tables#readme",
+  "bugs": {
+    "url": "https://github.com/dvyio/prettier-plugin-collapse-markdown-tables/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dvyio/prettier-plugin-collapse-markdown-tables.git"
+  },
+  "author": {
+    "name": "Davey Barker",
+    "url": "https://dvy.io"
+  },
+  "maintainers": [
+    {
+      "name": "Davey Barker",
+      "url": "https://dvy.io"
+    }
+  ],
+  "license": "MIT",
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "dist",
+    "docs",
+    "SECURITY.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "npm run build && npm run typecheck && npm run lint && npm run format && npm run knip && npm run test:coverage:built && npm run format:dogfood:check:built",
+    "check:release": "npm run check && npm run test:stress && npm run test:mutation && npm run pack:check",
+    "format": "prettier --check . --log-level warn",
+    "format:dogfood:check": "npm run build && npm run format:dogfood:check:built",
+    "format:dogfood:check:built": "prettier --check README.md CONTRIBUTING.md SECURITY.md tests/dogfood/markdown-tables.md --plugin ./dist/index.js --markdown-table-style spaced --ignore-path .prettierignore.dogfood --log-level warn",
+    "format:dogfood:fix": "npm run build && prettier --write README.md CONTRIBUTING.md SECURITY.md tests/dogfood/markdown-tables.md --plugin ./dist/index.js --markdown-table-style spaced --ignore-path .prettierignore.dogfood --log-level warn",
+    "format:fix": "prettier --write . --log-level warn",
+    "knip": "knip",
+    "lint": "eslint . --max-warnings=0",
+    "lint:fix": "eslint . --fix",
+    "pack:check": "npm pack --dry-run --json --silent",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm --dry-run=false run check:release",
+    "test": "npm run build && vitest run",
+    "test:coverage": "npm run build && npm run test:coverage:built",
+    "test:coverage:built": "vitest run --coverage",
+    "test:mutation": "stryker run",
+    "test:stress": "NORMALIZE_MARKDOWN_TABLES_STRESS=1 vitest run tests/normalizeMarkdownTables.test.ts tests/prettierPlugin.test.ts -t \"stays fast|rendering stays fast|scanning stays fast|quickly|list context stays fast|smoke-test limit|retained heap\"",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json"
+  },
+  "lint-staged": {
+    "*.{js,ts,mjs,cjs}": [
+      "eslint --max-warnings=0",
+      "prettier --check"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --check"
+    ],
+    "*.{css,scss,sass,less}": [
+      "prettier --check"
+    ]
+  },
+  "knip": {
+    "ignoreDependencies": [
+      "husky",
+      "prettier-3-0"
+    ]
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "peerDependencies": {
+    "prettier": "^3.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
+    "@types/node": "22.19.17",
+    "@vitest/coverage-v8": "^4.1.5",
+    "esbuild": "^0.28.0",
+    "eslint": "^10.2.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-perfectionist": "^5.9.0",
+    "eslint-plugin-unused-imports": "^4.4.1",
+    "globals": "^17.5.0",
+    "husky": "^9.1.7",
+    "knip": "^6.7.0",
+    "lint-staged": "^16.4.0",
+    "prettier": "^3.8.3",
+    "prettier-3-0": "npm:prettier@3.0.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.59.1",
+    "vitest": "4.1.5"
+  }
+}

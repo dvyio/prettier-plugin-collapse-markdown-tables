@@ -1,0 +1,14 @@
+# @fileoverview Requests weekly dependency update pull requests.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: prettier-3-0
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
