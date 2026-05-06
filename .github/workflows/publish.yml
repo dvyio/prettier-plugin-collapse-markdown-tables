@@ -14,6 +14,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  checks: read
   contents: write
   id-token: write
 
@@ -89,6 +90,41 @@ jobs:
             echo "sha=$sha"
             echo "notes_file=$RUNNER_TEMP/release-notes.md"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Confirm CI checks passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          deadline=$((SECONDS + 1800))
+          expected_ci_checks=6
+
+          while true; do
+            check_runs="$(gh api "repos/$GITHUB_REPOSITORY/commits/${{ steps.release.outputs.sha }}/check-runs?per_page=100" \
+              --jq '[.check_runs[] | select(.name | startswith("Node ")) | {name, status, conclusion}]')"
+
+            check_count="$(jq 'length' <<< "$check_runs")"
+            pending_count="$(jq '[.[] | select(.status != "completed")] | length' <<< "$check_runs")"
+            failed_checks="$(jq -r '.[] | select(.status == "completed" and .conclusion != "success") | "\(.name) ended with \(.conclusion)."' <<< "$check_runs")"
+
+            if [ -n "$failed_checks" ]; then
+              echo "$failed_checks"
+              exit 1
+            fi
+
+            if [ "$check_count" -ge "$expected_ci_checks" ] && [ "$pending_count" -eq 0 ]; then
+              echo "All CI checks passed for ${{ steps.release.outputs.sha }}."
+              exit 0
+            fi
+
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "Timed out waiting for CI checks to pass for ${{ steps.release.outputs.sha }}."
+              echo "Found $check_count of $expected_ci_checks expected CI checks. $pending_count checks are still running."
+              exit 1
+            fi
+
+            echo "Waiting for CI checks: found $check_count of $expected_ci_checks expected checks; $pending_count still running."
+            sleep 10
+          done
 
       - name: Check whether npm already has this version
         id: npm
