@@ -342,6 +342,26 @@ describe('prettier plugin', () => {
     );
   });
 
+  test('given Prettier shortens aligned separator cells, when formatting Markdown, then it still collapses the table', async () => {
+    const alignedMarkdown = [
+      '| L | C | R |',
+      '| :--- | :---: | ---: |',
+      '| a | b | c |',
+      '',
+    ].join('\n');
+
+    await expect(
+      prettier.format(alignedMarkdown, {
+        parser: 'markdown',
+        plugins: [plugin],
+      }),
+    ).resolves.toBe(
+      ['| L | C | R |', '| :--- | :---: | ---: |', '| a | b | c |', ''].join(
+        '\n',
+      ),
+    );
+  });
+
   test('given a bare GFM table, when formatting by default, then writes a spaced pipe table', async () => {
     const bareTable = [
       'Name  | Role',

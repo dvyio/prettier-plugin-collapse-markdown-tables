@@ -2337,6 +2337,18 @@ describe('normalizeMarkdownTables', () => {
     );
   });
 
+  test('given Prettier-shortened aligned separator cells, when normalizing, then keeps alignment markers', () => {
+    const markdown = [
+      '| L   |  C  |   R |',
+      '| :-- | :-: | --: |',
+      '| a   |  b  |   c |',
+    ].join('\n');
+
+    expect(normalizeMarkdownTables(markdown)).toBe(
+      ['| L | C | R |', '| :--- | :---: | ---: |', '| a | b | c |'].join('\n'),
+    );
+  });
+
   test('given empty header and body cells, when normalizing spaced tables, then keeps the empty columns visible', () => {
     const markdown = [
       '|      | Name  |      |',

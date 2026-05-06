@@ -650,7 +650,14 @@ function textRangeIntersectsNormalizationRange(
 }
 
 function isValidDelimiterCell(cell: string): boolean {
-  return /^:?-{3,}:?$/.test(cell);
+  if (!/^:?-+:?$/.test(cell)) {
+    return false;
+  }
+
+  const hyphenCount = cell.replaceAll(':', '').length;
+  const hasAlignmentMarker = cell.includes(':');
+
+  return hyphenCount >= 3 || (hasAlignmentMarker && cell.length >= 3);
 }
 
 function hasValidDelimiterRow(

@@ -19,6 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         node:
+          - 20.x
           - 22.x
           - 24.x
         prettier:
@@ -43,13 +44,13 @@ jobs:
         run: npm install --no-save --package-lock=false --ignore-scripts prettier@^3
 
       - name: Run release checks
-        if: matrix.node == '22.x' && matrix.prettier == 'lockfile'
+        if: matrix.node == '20.x' && matrix.prettier == 'lockfile'
         run: npm run check:release
 
       - name: Run checks
-        if: matrix.node != '22.x' || matrix.prettier != 'lockfile'
+        if: matrix.node != '20.x' || matrix.prettier != 'lockfile'
         run: npm run check
 
       - name: Check package dry run
-        if: matrix.node != '22.x' || matrix.prettier != 'lockfile'
+        if: matrix.node != '20.x' || matrix.prettier != 'lockfile'
         run: npm run pack:check

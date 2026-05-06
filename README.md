@@ -14,12 +14,12 @@ The plugin runs after Prettier's Markdown printer. It keeps real Markdown tables
 
 ## Requirements
 
-- Node `>=22.12`
+- Node `>=20.19.0`
 - Prettier `^3.0.0`
 
 The test suite checks the packed plugin with Prettier `3.0.0` and the current Prettier `3.x` release used by this repo.
 
-CI runs `npm run check` and `npm run pack:check` on Node `22.x` and Node `24.x`. Each Node job has two Prettier lanes: the lockfile install and a fresh `prettier@^3` install. That makes the package fail fast when either the minimum Node version, the supported Prettier peer range, or the packed release shape breaks.
+CI runs `npm run check` and `npm run pack:check` on Node `20.x`, Node `22.x`, and Node `24.x`. Each Node job has two Prettier lanes: the lockfile install and a fresh `prettier@^3` install. That makes the package fail fast when either the minimum Node version, the supported Prettier peer range, or the packed release shape breaks.
 
 Node versions newer than `24.x` are allowed by `engines.node` and are expected to work, but they are not separately certified by CI yet.
 

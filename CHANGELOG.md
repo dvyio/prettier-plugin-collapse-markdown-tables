@@ -16,6 +16,17 @@ The supported Prettier line is Prettier `3.x`. The test suite checks the packed 
 
 Parser-behaviour changes need a changelog entry when they affect which table-shaped text is rewritten, which regions are protected, or how range and cursor offsets map after formatting. If a change can alter a user's Markdown output, it belongs here.
 
+## 0.1.1 - 2026-05-06
+
+### Fixed
+
+- Collapsed aligned tables when Prettier shortens tiny separator cells such as `:--`, `:-:`, and `--:`.
+
+### Changed
+
+- Lowered the supported runtime range to Node `>=20.19.0`.
+- Added Node `20.x` to CI checks.
+
 ## 0.1.0 - 2026-05-05
 
 Initial release.
@@ -34,4 +45,4 @@ Initial release.
 
 - The package is ESM-only. CommonJS Prettier configs can load the plugin by package-name string, but direct `require("@dvyio/prettier-plugin-collapse-markdown-tables")` is not supported.
 - The plugin must be the active Markdown printer. It does not compose with other plugins that also replace Prettier's Markdown `mdast` printer.
-- Supported runtime range: Node `>=22.12` and Prettier `^3.0.0`.
+- Supported runtime range: Node `>=20.19.0` and Prettier `^3.0.0`.
