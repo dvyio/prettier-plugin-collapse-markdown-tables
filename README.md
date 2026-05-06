@@ -68,7 +68,7 @@ Before publishing a release, run the release gate:
 npm run check:release
 ```
 
-Tagged releases publish from GitHub Actions through npm trusted publishing. See [docs/release-runbook.md](https://github.com/dvyio/prettier-plugin-collapse-markdown-tables/blob/main/docs/release-runbook.md) for the full release flow.
+After `main` CI passes, GitHub Actions creates the release tag, publishes through npm trusted publishing, and creates the GitHub release. See [docs/release-runbook.md](https://github.com/dvyio/prettier-plugin-collapse-markdown-tables/blob/main/docs/release-runbook.md) for the full release flow.
 
 ## License
 

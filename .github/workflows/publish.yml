@@ -1,27 +1,40 @@
-# @fileoverview Publishes tagged releases to npm.
+# @fileoverview Publishes npm releases after main branch CI passes.
 name: Publish
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
 
 concurrency:
-  group: publish-${{ github.ref }}
+  group: publish-main
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 jobs:
   publish:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
     steps:
-      - name: Check out repository
+      - name: Check out release commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || 'main' }}
 
       - name: Set up Node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
@@ -38,19 +51,105 @@ jobs:
           node --version
           npm --version
 
-      - name: Verify tag matches package version
+      - name: Read release metadata
+        id: release
         run: |
+          package_name="$(node -p "require('./package.json').name")"
           version="$(node -p "require('./package.json').version")"
-          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match package.json version v$version."
+          tag="v$version"
+          sha="$(git rev-parse HEAD)"
+
+          if ! grep -q "^## $version - " CHANGELOG.md; then
+            echo "CHANGELOG.md must include a $version release entry before publishing."
             exit 1
           fi
 
+          awk -v version="$version" '
+            $0 ~ "^## " version " - " {
+              capture = 1
+              next
+            }
+            capture && /^## / {
+              exit
+            }
+            capture {
+              print
+            }
+          ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
+
+          if [ ! -s "$RUNNER_TEMP/release-notes.md" ]; then
+            echo "CHANGELOG.md release entry for $version must include notes."
+            exit 1
+          fi
+
+          {
+            echo "package_name=$package_name"
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "sha=$sha"
+            echo "notes_file=$RUNNER_TEMP/release-notes.md"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check whether npm already has this version
+        id: npm
+        run: |
+          if npm view "${{ steps.release.outputs.package_name }}@${{ steps.release.outputs.version }}" version >/dev/null 2>&1; then
+            echo "Version ${{ steps.release.outputs.version }} is already published. Nothing to release."
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "should_publish=true" >> "$GITHUB_OUTPUT"
+
+      - name: Check release tag
+        id: tag
+        if: steps.npm.outputs.should_publish == 'true'
+        run: |
+          remote_tag_sha="$(git ls-remote --tags origin "refs/tags/${{ steps.release.outputs.tag }}" | awk '{ print $1 }')"
+
+          if [ -z "$remote_tag_sha" ]; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$remote_tag_sha" != "${{ steps.release.outputs.sha }}" ]; then
+            echo "Tag ${{ steps.release.outputs.tag }} points to $remote_tag_sha, not ${{ steps.release.outputs.sha }}."
+            exit 1
+          fi
+
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+
       - name: Install dependencies
+        if: steps.npm.outputs.should_publish == 'true'
         run: npm ci
 
-      - name: Build package
-        run: npm run build
+      - name: Run release gate
+        if: steps.npm.outputs.should_publish == 'true'
+        run: npm run check:release
+
+      - name: Create release tag
+        if: steps.npm.outputs.should_publish == 'true' && steps.tag.outputs.exists == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.release.outputs.tag }}" "${{ steps.release.outputs.sha }}"
+          git push origin "${{ steps.release.outputs.tag }}"
 
       - name: Publish to npm
+        if: steps.npm.outputs.should_publish == 'true'
         run: npm publish --access public --ignore-scripts
+
+      - name: Create GitHub release
+        if: steps.npm.outputs.should_publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.release.outputs.tag }}" >/dev/null 2>&1; then
+            echo "GitHub release ${{ steps.release.outputs.tag }} already exists."
+            exit 0
+          fi
+
+          gh release create "${{ steps.release.outputs.tag }}" \
+            --target "${{ steps.release.outputs.sha }}" \
+            --title "${{ steps.release.outputs.tag }}" \
+            --notes-file "${{ steps.release.outputs.notes_file }}"
