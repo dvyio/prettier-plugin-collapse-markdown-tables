@@ -55,7 +55,7 @@ Checklist:
 
 - Table detection still requires safe pipe-wrapped rows and valid delimiter rows.
 - Range handling normalizes only tables that intersect the requested range.
-- Protected-region scanning still skips front matter, code fences, indented code, comments, HTML blocks, raw HTML, MDX JSX, MDX ESM, and Prettier ignore ranges.
+- Protected-region scanning still skips front matter, protected code fences, indented code, comments, HTML blocks, raw HTML, MDX JSX, MDX ESM, and Prettier ignore ranges.
 - Row parsing keeps list and blockquote prefixes stable.
 - Code spans follow CommonMark rules: matching delimiter-run length, literal backslashes inside spans, escaped opening backticks only with odd backslashes, and unmatched spans marked unsafe.
 - Escaped pipes use odd/even backslash counts in cell scanning, row repair, and rendering.

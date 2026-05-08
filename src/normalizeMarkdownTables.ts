@@ -5,6 +5,7 @@
 import { Buffer } from 'node:buffer';
 
 import type {
+  MarkdownTableFencedCode as NormalizerMarkdownTableFencedCode,
   MarkdownTableStyle as NormalizerMarkdownTableStyle,
   ParsedMarkdownTableRow as NormalizerParsedMarkdownTableRow,
   TableRowPrefix as NormalizerTableRowPrefix,
@@ -23,6 +24,7 @@ import {
 } from './normalizer/lineUtils.js';
 import {
   describeUnknownValue,
+  parseMarkdownTableFencedCode,
   parseMarkdownTableStyle,
   readNormalizeMarkdownTablesOptions,
 } from './normalizer/options.js';
@@ -37,6 +39,9 @@ import {
 
 /** Table output style accepted by the public helper and Prettier option. */
 export type MarkdownTableStyle = NormalizerMarkdownTableStyle;
+
+/** Fenced-code behavior accepted by the public helper and Prettier option. */
+export type MarkdownTableFencedCode = NormalizerMarkdownTableFencedCode;
 
 /** Parsed cells and repair metadata for one pipe-started Markdown table row. */
 export type ParsedMarkdownTableRow = NormalizerParsedMarkdownTableRow;
@@ -60,6 +65,11 @@ export type NormalizeMarkdownTablesOptions = {
    * the MDX JSX scanner.
    */
   readonly enableMdxJsx?: boolean;
+  /**
+   * Fenced-code behavior. `protected` keeps all fenced code blocks unchanged,
+   * and `markdown` lets tables inside Markdown-like fences be rewritten.
+   */
+  readonly markdownTableFencedCode?: MarkdownTableFencedCode;
   /**
    * Table output style. `spaced` keeps one space inside each cell, `compact`
    * removes that padding, and `prettier` returns the input unchanged.
@@ -116,6 +126,9 @@ export function normalizeMarkdownTables(
   const tableStyle = parseMarkdownTableStyle(
     normalizeOptions.markdownTableStyle,
   );
+  const markdownTableFencedCode = parseMarkdownTableFencedCode(
+    normalizeOptions.markdownTableFencedCode,
+  );
   const markdownLength = toMarkdownOffset(markdown.length);
   const normalizationRange = getNormalizationRange(
     markdownLength,
@@ -151,7 +164,10 @@ export function normalizeMarkdownTables(
     return markdown;
   }
 
-  const protectedLines = findProtectedLines(lines, normalizeOptions);
+  const protectedLines = findProtectedLines(lines, {
+    ...normalizeOptions,
+    markdownTableFencedCode,
+  });
 
   for (
     let index: number = tableSearchWindow.start;

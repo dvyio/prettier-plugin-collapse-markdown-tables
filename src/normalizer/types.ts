@@ -53,6 +53,7 @@ export type ScanTextOffset = {
 export type UncheckedNormalizeMarkdownTablesOptions = {
   readonly enableMdxEsm?: unknown;
   readonly enableMdxJsx?: unknown;
+  readonly markdownTableFencedCode?: unknown;
   readonly markdownTableStyle?: unknown;
   readonly maxInputBytes?: number | undefined;
   readonly rangeEnd?: unknown;
@@ -215,6 +216,7 @@ export type NormalizedTableRow =
 export type FenceStart = {
   readonly char: '`' | '~';
   readonly length: number;
+  readonly offset: MarkdownOffset;
 };
 
 /** Private parsed table row with the branded prefix required by renderer code. */

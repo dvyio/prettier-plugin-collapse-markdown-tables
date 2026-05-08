@@ -9,6 +9,7 @@ import type {
   FootnoteDefinitionStart,
   ListItemStart,
   MarkdownColumn,
+  MarkdownOffset,
   PrettierIgnoreDirective,
   UncheckedNormalizeMarkdownTablesOptions,
 } from './types.js';
@@ -40,16 +41,26 @@ import { findMdxJsxEnd, isMdxJsxStartCandidate } from './mdxJsx.js';
 import { findMarkdownTableBlock, parsePipedRow } from './tableRows.js';
 
 const MARKDOWN_TAB_WIDTH = 4;
+const MARKDOWN_TABLE_FENCE_LANGUAGES = [
+  'gfm',
+  'markdown',
+  'md',
+  'mdx',
+] as const;
 
 type ProtectedLineContext = {
   readonly containerContents: ReadonlyArray<string>;
   readonly containerKeys: ReadonlyArray<ContainerKey>;
   readonly containerLines: ReadonlyArray<ContainerLine>;
-  readonly detectionLines: ReadonlyArray<string>;
+  readonly enabledMarkdownFenceDelimiterLines: ReadonlyArray<boolean>;
+  readonly enabledMarkdownFenceEndLines: ReadonlyArray<number | undefined>;
   readonly footnoteContinuationTableRows: ReadonlyArray<boolean>;
   readonly lines: ReadonlyArray<string>;
   readonly listContinuationTableRows: ReadonlyArray<boolean>;
   readonly options: UncheckedNormalizeMarkdownTablesOptions;
+  readonly scanContents: ReadonlyArray<string>;
+  readonly scanDetectionLines: ReadonlyArray<string>;
+  readonly scanKeys: ReadonlyArray<ContainerKey>;
 };
 
 type ProtectedLineDetector = (
@@ -69,6 +80,14 @@ type ProtectedLineDetectorResult =
 type ProtectedLineRange = {
   readonly end: number;
   readonly start: number;
+};
+
+type EnabledMarkdownFenceLines = {
+  readonly delimiterLines: ReadonlyArray<boolean>;
+  readonly endLines: ReadonlyArray<number | undefined>;
+  readonly scanContents: ReadonlyArray<string>;
+  readonly scanDetectionLines: ReadonlyArray<string>;
+  readonly scanKeys: ReadonlyArray<ContainerKey>;
 };
 
 const SKIP_PROTECTED_LINE_DETECTION: ProtectedLineDetectorResult = {
@@ -108,6 +127,12 @@ function createProtectedLineContext(
   const containerLines = detectionLines.map(parseContainerLine);
   const containerContents = containerLines.map(({ content }) => content);
   const containerKeys = containerLines.map(({ key }) => key);
+  const enabledMarkdownFenceLines = findEnabledMarkdownFenceLines(
+    lines,
+    containerContents,
+    containerKeys,
+    options,
+  );
   const continuationContainerLines = detectionLines.map(
     parseContinuationContainerLine,
   );
@@ -122,12 +147,145 @@ function createProtectedLineContext(
     containerContents,
     containerKeys,
     containerLines,
-    detectionLines,
+    enabledMarkdownFenceDelimiterLines:
+      enabledMarkdownFenceLines.delimiterLines,
+    enabledMarkdownFenceEndLines: enabledMarkdownFenceLines.endLines,
     footnoteContinuationTableRows,
     lines,
     listContinuationTableRows,
     options,
+    scanContents: enabledMarkdownFenceLines.scanContents,
+    scanDetectionLines: enabledMarkdownFenceLines.scanDetectionLines,
+    scanKeys: enabledMarkdownFenceLines.scanKeys,
   };
+}
+
+function findEnabledMarkdownFenceLines(
+  lines: ReadonlyArray<string>,
+  containerContents: ReadonlyArray<string>,
+  containerKeys: ReadonlyArray<ContainerKey>,
+  options: UncheckedNormalizeMarkdownTablesOptions,
+): EnabledMarkdownFenceLines {
+  const delimiterLines = Array.from({ length: lines.length }, () => false);
+  const endLines: Array<number | undefined> = Array.from(
+    { length: lines.length },
+    () => undefined,
+  );
+  const scanContents = [...containerContents];
+  const scanDetectionLines = lines.map(stripRootByteOrderMark);
+  const scanKeys = [...containerKeys];
+
+  if (options.markdownTableFencedCode !== 'markdown') {
+    return {
+      delimiterLines,
+      endLines,
+      scanContents,
+      scanDetectionLines,
+      scanKeys,
+    };
+  }
+
+  for (let index = 0; index < lines.length; index++) {
+    if (delimiterLines[index] === true) {
+      continue;
+    }
+
+    const line = containerContents[index];
+
+    if (line === undefined) {
+      continue;
+    }
+
+    const fence = parseFenceStart(line);
+
+    if (fence === undefined || !isMarkdownTableFenceStart(line, fence)) {
+      continue;
+    }
+
+    const end = findFenceEnd(
+      lines,
+      containerContents,
+      containerKeys,
+      index,
+      fence,
+    );
+
+    delimiterLines[index] = true;
+    delimiterLines[end] = true;
+
+    for (let contentIndex = index + 1; contentIndex < end; contentIndex++) {
+      const contentLine = readEnabledMarkdownFenceContentLine(
+        lines,
+        contentIndex,
+        fence,
+        containerKeys[index] ?? ROOT_CONTAINER_KEY,
+      );
+      const scanLine = parseContainerLine(contentLine);
+
+      endLines[contentIndex] = end;
+      scanContents[contentIndex] = scanLine.content;
+      scanDetectionLines[contentIndex] = contentLine;
+      scanKeys[contentIndex] = scanLine.key;
+    }
+  }
+
+  return {
+    delimiterLines,
+    endLines,
+    scanContents,
+    scanDetectionLines,
+    scanKeys,
+  };
+}
+
+function readEnabledMarkdownFenceContentLine(
+  lines: ReadonlyArray<string>,
+  index: number,
+  fence: FenceStart,
+  fenceContainerKey: ContainerKey,
+): string {
+  const line =
+    fenceContainerKey === ROOT_CONTAINER_KEY
+      ? (lines[index] ?? '')
+      : stripContainerPrefix(lines[index] ?? '', fenceContainerKey);
+
+  return line.slice(countRemovableFenceIndent(line, fence.offset));
+}
+
+function stripContainerPrefix(line: string, key: ContainerKey): string {
+  let offset = 0;
+
+  for (const part of key.split('/')) {
+    const end = findContainerPartEnd(line, offset, part);
+
+    if (end === undefined) {
+      return line.slice(offset);
+    }
+
+    offset = end;
+  }
+
+  return line.slice(offset);
+}
+
+function findContainerPartEnd(
+  line: string,
+  offset: number,
+  part: string,
+): number | undefined {
+  if (part === 'blockquote') {
+    return parseContainerBlockquoteEnd(line, offset);
+  }
+
+  if (part === 'list') {
+    return parseContainerListItemEnd(line, offset);
+  }
+
+  if (part === 'indent') {
+    return parseContainerIndentEnd(line, offset);
+  }
+
+  return undefined;
 }
 
 function findProtectedLineRanges(
@@ -182,11 +340,34 @@ function findStructuralProtectedRanges(
       continue;
     }
 
-    ranges.push(result.range);
-    index = result.range.end;
+    const range = constrainProtectedRangeToEnabledMarkdownFence(
+      context,
+      index,
+      result.range,
+    );
+
+    ranges.push(range);
+    index = range.end;
   }
 
   return ranges;
+}
+
+function constrainProtectedRangeToEnabledMarkdownFence(
+  context: ProtectedLineContext,
+  index: number,
+  range: ProtectedLineRange,
+): ProtectedLineRange {
+  const enabledFenceEnd = context.enabledMarkdownFenceEndLines[index];
+
+  if (enabledFenceEnd === undefined || range.end < enabledFenceEnd) {
+    return range;
+  }
+
+  return createProtectedLineRange(
+    range.start,
+    Math.max(range.start, enabledFenceEnd - 1),
+  );
 }
 
 function findStructuralProtectedRange(
@@ -208,7 +389,11 @@ function findFenceProtectedRange(
   context: ProtectedLineContext,
   index: number,
 ): ProtectedLineDetectorResult | undefined {
-  const line = context.containerContents[index];
+  if (context.enabledMarkdownFenceDelimiterLines[index] === true) {
+    return SKIP_PROTECTED_LINE_DETECTION;
+  }
+
+  const line = context.scanContents[index];
 
   if (line === undefined) {
     return undefined;
@@ -220,12 +405,19 @@ function findFenceProtectedRange(
     return undefined;
   }
 
+  if (
+    context.options.markdownTableFencedCode === 'markdown' &&
+    isMarkdownTableFenceStart(line, fence)
+  ) {
+    return SKIP_PROTECTED_LINE_DETECTION;
+  }
+
   return createProtectedLineRangeResult(
     index,
     findFenceEnd(
-      context.lines,
-      context.containerContents,
-      context.containerKeys,
+      context.scanDetectionLines,
+      context.scanContents,
+      context.scanKeys,
       index,
       fence,
     ),
@@ -236,6 +428,17 @@ function findIndentedCodeProtectedRange(
   context: ProtectedLineContext,
   index: number,
 ): ProtectedLineDetectorResult | undefined {
+  if (context.enabledMarkdownFenceEndLines[index] !== undefined) {
+    const content = context.scanContents[index] ?? '';
+    const key = context.scanKeys[index] ?? ROOT_CONTAINER_KEY;
+
+    if (!isIndentedCodeLineInsideEnabledMarkdownFence({ content, key })) {
+      return undefined;
+    }
+
+    return createProtectedLineRangeResult(index, index);
+  }
+
   if (
     !isIndentedCodeLine(
       context.containerLines,
@@ -250,11 +453,42 @@ function findIndentedCodeProtectedRange(
   return createProtectedLineRangeResult(index, index);
 }
 
+function isIndentedCodeLineInsideEnabledMarkdownFence(
+  containerLine: ContainerLine,
+): boolean {
+  if (containerLine.content.trim() === '') {
+    return false;
+  }
+
+  if (isIndentedContainerLine(containerLine)) {
+    return true;
+  }
+
+  return scanMarkdownIndent(containerLine.content).column >= 4;
+}
+
+function countRemovableFenceIndent(
+  line: string,
+  fenceIndentOffset: MarkdownOffset,
+): number {
+  let offset = 0;
+
+  while (
+    offset < fenceIndentOffset &&
+    offset < line.length &&
+    line[offset] === ' '
+  ) {
+    offset++;
+  }
+
+  return offset;
+}
+
 function findMdxEsmProtectedRange(
   context: ProtectedLineContext,
   index: number,
 ): ProtectedLineDetectorResult | undefined {
-  const line = context.containerContents[index];
+  const line = context.scanContents[index];
 
   if (
     context.options.enableMdxEsm !== true ||
@@ -266,7 +500,7 @@ function findMdxEsmProtectedRange(
 
   return createProtectedLineRangeResult(
     index,
-    findMdxEsmEnd(context.containerContents, context.containerKeys, index),
+    findMdxEsmEnd(context.scanContents, context.scanKeys, index),
   );
 }
 
@@ -274,9 +508,7 @@ function skipPrettierIgnoreDirective(
   context: ProtectedLineContext,
   index: number,
 ): ProtectedLineDetectorResult | undefined {
-  if (
-    parsePrettierIgnoreDirective(context.containerContents[index]) === undefined
-  ) {
+  if (parsePrettierIgnoreDirective(context.scanContents[index]) === undefined) {
     return undefined;
   }
 
@@ -287,7 +519,7 @@ function findMdxFlowExpressionProtectedRange(
   context: ProtectedLineContext,
   index: number,
 ): ProtectedLineDetectorResult | undefined {
-  const line = context.containerContents[index];
+  const line = context.scanContents[index];
 
   if (
     context.options.enableMdxEsm !== true ||
@@ -299,11 +531,7 @@ function findMdxFlowExpressionProtectedRange(
 
   return createProtectedLineRangeResult(
     index,
-    findMdxFlowExpressionEnd(
-      context.containerContents,
-      context.containerKeys,
-      index,
-    ),
+    findMdxFlowExpressionEnd(context.scanContents, context.scanKeys, index),
   );
 }
 
@@ -312,8 +540,8 @@ function findHtmlCommentProtectedRange(
   index: number,
 ): ProtectedLineDetectorResult | undefined {
   const htmlCommentEnd = findHtmlCommentEnd(
-    context.containerContents,
-    context.containerKeys,
+    context.scanContents,
+    context.scanKeys,
     index,
   );
 
@@ -329,8 +557,8 @@ function findRawHtmlProtectedRange(
   index: number,
 ): ProtectedLineDetectorResult | undefined {
   const rawHtmlEnd = findRawHtmlEnd(
-    context.containerContents,
-    context.containerKeys,
+    context.scanContents,
+    context.scanKeys,
     index,
   );
 
@@ -345,7 +573,7 @@ function findMdxJsxProtectedRange(
   context: ProtectedLineContext,
   index: number,
 ): ProtectedLineDetectorResult | undefined {
-  const line = context.containerContents[index];
+  const line = context.scanContents[index];
 
   if (
     context.options.enableMdxJsx !== true ||
@@ -356,9 +584,9 @@ function findMdxJsxProtectedRange(
   }
 
   const mdxJsxEnd = findMdxJsxEnd(
-    context.detectionLines,
-    context.containerContents,
-    context.containerKeys,
+    context.scanDetectionLines,
+    context.scanContents,
+    context.scanKeys,
     toLineIndex(index),
   );
 
@@ -374,8 +602,8 @@ function findHtmlBlockProtectedRange(
   index: number,
 ): ProtectedLineDetectorResult | undefined {
   const htmlBlockEnd = findHtmlBlockEnd(
-    context.containerContents,
-    context.containerKeys,
+    context.scanContents,
+    context.scanKeys,
     index,
   );
 
@@ -603,10 +831,8 @@ function findPrettierIgnoredRanges(
       continue;
     }
 
-    const directive = parsePrettierIgnoreDirective(
-      context.containerContents[index],
-    );
-    const containerKey = context.containerKeys[index] ?? ROOT_CONTAINER_KEY;
+    const directive = parsePrettierIgnoreDirective(context.scanContents[index]);
+    const containerKey = context.scanKeys[index] ?? ROOT_CONTAINER_KEY;
     const ignoredContainerKey =
       containerKey === ROOT_CONTAINER_KEY ? undefined : containerKey;
 
@@ -627,14 +853,18 @@ function findPrettierIgnoredRanges(
     }
 
     if (directive === 'start') {
-      const range = createProtectedLineRange(
+      const range = constrainProtectedRangeToEnabledMarkdownFence(
+        context,
         index,
-        findPrettierIgnoreRangeEnd(
-          context.containerContents,
-          context.containerKeys,
-          ignoredProtectedLines,
-          index + 1,
-          ignoredContainerKey,
+        createProtectedLineRange(
+          index,
+          findPrettierIgnoreRangeEnd(
+            context.scanContents,
+            context.scanKeys,
+            ignoredProtectedLines,
+            index + 1,
+            ignoredContainerKey,
+          ),
         ),
       );
 
@@ -654,8 +884,8 @@ function findNextIgnoredTableRanges(
   containerKey: ContainerKey | undefined,
 ): ReadonlyArray<ProtectedLineRange> {
   const blockStart = findNextNonBlankLine(
-    context.containerContents,
-    context.containerKeys,
+    context.scanContents,
+    context.scanKeys,
     start,
     containerKey,
   );
@@ -665,10 +895,10 @@ function findNextIgnoredTableRanges(
   }
 
   return findTablesInsideIgnoredBlockRanges(
-    context.lines,
+    context.scanDetectionLines,
     protectedLines,
     blockStart,
-    findIgnoredMarkdownBlockEnd(context.lines, blockStart),
+    findIgnoredMarkdownBlockEnd(context.scanDetectionLines, blockStart),
   );
 }
 
@@ -1076,7 +1306,28 @@ function parseFenceStart(line: string): FenceStart | undefined {
     return undefined;
   }
 
-  return { char, length };
+  return { char, length, offset: indent.offset };
+}
+
+function isMarkdownTableFenceStart(line: string, fence: FenceStart): boolean {
+  const language = readFenceLanguage(line, fence);
+
+  return MARKDOWN_TABLE_FENCE_LANGUAGES.some(
+    (markdownLanguage) => markdownLanguage === language,
+  );
+}
+
+function readFenceLanguage(
+  line: string,
+  fence: FenceStart,
+): string | undefined {
+  const info = line.slice(fence.offset + fence.length).trim();
+
+  if (info === '') {
+    return undefined;
+  }
+
+  return info.split(/\s+/, 1)[0]?.toLowerCase();
 }
 
 function findFenceEnd(

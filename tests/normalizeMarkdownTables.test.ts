@@ -225,7 +225,7 @@ describe('normalizeMarkdownTables', () => {
         markdownTableStyles: 'compact',
       }),
     ).toThrow(
-      'Invalid normalizeMarkdownTables option "markdownTableStyles" - expected one of "enableMdxEsm", "enableMdxJsx", "markdownTableStyle", "maxInputBytes", "rangeEnd", or "rangeStart".',
+      'Invalid normalizeMarkdownTables option "markdownTableStyles" - expected one of "enableMdxEsm", "enableMdxJsx", "markdownTableFencedCode", "markdownTableStyle", "maxInputBytes", "rangeEnd", or "rangeStart".',
     );
   });
 
@@ -279,6 +279,24 @@ describe('normalizeMarkdownTables', () => {
       }),
     ).toThrow(
       'Invalid markdownTableStyle "wide" — expected "spaced", "compact", or "prettier".',
+    );
+  });
+
+  test('given an invalid fenced-code option from an untyped caller, when normalizing, then it throws a clear error', () => {
+    const markdown = [
+      '```markdown',
+      '| Name  | Role        |',
+      '| ----- | ----------- |',
+      '| Davey | Builder     |',
+      '```',
+    ].join('\n');
+
+    expect(() =>
+      normalizeMarkdownTablesFromUntypedOptions(markdown, {
+        markdownTableFencedCode: 'all',
+      }),
+    ).toThrow(
+      'Invalid markdownTableFencedCode "all" — expected "protected" or "markdown".',
     );
   });
 
@@ -3079,6 +3097,289 @@ describe('normalizeMarkdownTables', () => {
         '| Davey | Builder |',
       ].join('\n'),
     );
+  });
+
+  test('given Markdown-like fenced code is enabled, when normalizing, then collapses tables inside those fences', () => {
+    const markdownFenceCases = [
+      {
+        closingFence: '```',
+        label: 'markdown',
+        openingFence: '```markdown',
+      },
+      {
+        closingFence: '```',
+        label: 'md',
+        openingFence: '```md',
+      },
+      {
+        closingFence: '```',
+        label: 'mdx',
+        openingFence: '```mdx',
+      },
+      {
+        closingFence: '```',
+        label: 'gfm',
+        openingFence: '```gfm',
+      },
+      {
+        closingFence: '~~~',
+        label: 'tilde markdown',
+        openingFence: '~~~markdown',
+      },
+      {
+        closingFence: '   ```',
+        label: 'indented markdown',
+        openingFence: '   ```markdown',
+      },
+    ] as const;
+
+    for (const fenceCase of markdownFenceCases) {
+      const markdown = [
+        fenceCase.openingFence,
+        '| Name  | Role        |',
+        '| ----- | ----------- |',
+        '| Davey | Builder     |',
+        fenceCase.closingFence,
+      ].join('\n');
+
+      expect(
+        normalizeMarkdownTables(markdown, {
+          markdownTableFencedCode: 'markdown',
+        }),
+        fenceCase.label,
+      ).toBe(
+        [
+          fenceCase.openingFence,
+          '| Name | Role |',
+          '| --- | --- |',
+          '| Davey | Builder |',
+          fenceCase.closingFence,
+        ].join('\n'),
+      );
+    }
+  });
+
+  test('given Markdown-like fenced code is enabled and followed by a table, when normalizing, then collapses both tables', () => {
+    const markdown = [
+      '```markdown',
+      '| Name  | Role        |',
+      '| ----- | ----------- |',
+      '| Davey | Builder     |',
+      '```',
+      '',
+      '| Goal  | Owner       |',
+      '| ----- | ----------- |',
+      '| Ship  | Team        |',
+    ].join('\n');
+
+    expect(
+      normalizeMarkdownTables(markdown, {
+        markdownTableFencedCode: 'markdown',
+      }),
+    ).toBe(
+      [
+        '```markdown',
+        '| Name | Role |',
+        '| --- | --- |',
+        '| Davey | Builder |',
+        '```',
+        '',
+        '| Goal | Owner |',
+        '| --- | --- |',
+        '| Ship | Team |',
+      ].join('\n'),
+    );
+  });
+
+  test('given an indented Markdown fence has fence-indented table rows, when normalizing, then collapses the fenced table', () => {
+    const markdown = [
+      '   ```markdown',
+      '    | Name  | Role        |',
+      '    | ----- | ----------- |',
+      '    | Davey | Builder     |',
+      '   ```',
+    ].join('\n');
+
+    expect(
+      normalizeMarkdownTables(markdown, {
+        markdownTableFencedCode: 'markdown',
+      }),
+    ).toBe(
+      [
+        '   ```markdown',
+        '    | Name | Role |',
+        '    | --- | --- |',
+        '    | Davey | Builder |',
+        '   ```',
+      ].join('\n'),
+    );
+  });
+
+  test('given an indented Markdown fence has nested indented code, when normalizing, then leaves that code unchanged', () => {
+    const markdown = [
+      '   ```markdown',
+      '       | Name  | Role        |',
+      '       | ----- | ----------- |',
+      '       | Davey | Builder     |',
+      '   ```',
+    ].join('\n');
+
+    expect(
+      normalizeMarkdownTables(markdown, {
+        markdownTableFencedCode: 'markdown',
+      }),
+    ).toBe(markdown);
+  });
+
+  test('given non-Markdown fenced code is enabled, when normalizing, then leaves those fences unchanged', () => {
+    const fenceCases = ['ts', 'sh', ''] as const;
+
+    for (const fenceLanguage of fenceCases) {
+      const openingFence = `\`\`\`${fenceLanguage}`;
+      const markdown = [
+        openingFence,
+        '| Name  | Role        |',
+        '| ----- | ----------- |',
+        '| Davey | Builder     |',
+        '```',
+      ].join('\n');
+
+      expect(
+        normalizeMarkdownTables(markdown, {
+          markdownTableFencedCode: 'markdown',
+        }),
+        fenceLanguage || 'unlabeled',
+      ).toBe(markdown);
+    }
+  });
+
+  test('given Markdown and non-Markdown fences share a document, when normalizing, then only Markdown fences are enabled', () => {
+    const markdown = [
+      '```markdown',
+      '| Name  | Role        |',
+      '| ----- | ----------- |',
+      '| Davey | Builder     |',
+      '```',
+      '',
+      '```text',
+      '| Text  | Fence       |',
+      '| ----- | ----------- |',
+      '| Keep  | Unchanged   |',
+      '```',
+      '',
+      '```ts',
+      '| Type  | Fence       |',
+      '| ----- | ----------- |',
+      '| Keep  | Unchanged   |',
+      '```',
+    ].join('\n');
+
+    expect(
+      normalizeMarkdownTables(markdown, {
+        markdownTableFencedCode: 'markdown',
+      }),
+    ).toBe(
+      [
+        '```markdown',
+        '| Name | Role |',
+        '| --- | --- |',
+        '| Davey | Builder |',
+        '```',
+        '',
+        '```text',
+        '| Text  | Fence       |',
+        '| ----- | ----------- |',
+        '| Keep  | Unchanged   |',
+        '```',
+        '',
+        '```ts',
+        '| Type  | Fence       |',
+        '| ----- | ----------- |',
+        '| Keep  | Unchanged   |',
+        '```',
+      ].join('\n'),
+    );
+  });
+
+  test('given Markdown fenced code contains a non-Markdown nested fence, when normalizing, then the nested fence stays unchanged', () => {
+    const markdown = [
+      '````markdown',
+      '```text',
+      '| Name  | Role        |',
+      '| ----- | ----------- |',
+      '| Davey | Builder     |',
+      '```',
+      '````',
+    ].join('\n');
+
+    expect(
+      normalizeMarkdownTables(markdown, {
+        markdownTableFencedCode: 'markdown',
+      }),
+    ).toBe(markdown);
+  });
+
+  test('given Markdown fenced code contains an unclosed non-Markdown nested fence, when normalizing, then the nested fence stays bounded', () => {
+    const markdown = [
+      '~~~markdown',
+      '```text',
+      '| Keep  | This        |',
+      '| ----- | ----------- |',
+      '~~~',
+      '',
+      '| Collapse | This |',
+      '| -------- | ---- |',
+    ].join('\n');
+
+    expect(
+      normalizeMarkdownTables(markdown, {
+        markdownTableFencedCode: 'markdown',
+      }),
+    ).toBe(
+      [
+        '~~~markdown',
+        '```text',
+        '| Keep  | This        |',
+        '| ----- | ----------- |',
+        '~~~',
+        '',
+        '| Collapse | This |',
+        '| --- | --- |',
+      ].join('\n'),
+    );
+  });
+
+  test('given an indented Markdown fence contains a nested non-Markdown fence, when normalizing, then the nested fence stays unchanged', () => {
+    const markdown = [
+      '   ```markdown',
+      '    ```text',
+      '    | Keep  | This        |',
+      '    | ----- | ----------- |',
+      '    ```',
+      '   ```',
+    ].join('\n');
+
+    expect(
+      normalizeMarkdownTables(markdown, {
+        markdownTableFencedCode: 'markdown',
+      }),
+    ).toBe(markdown);
+  });
+
+  test('given a blockquoted Markdown fence contains indented code, when normalizing, then the indented code stays unchanged', () => {
+    const markdown = [
+      '> ```markdown',
+      '>     | Keep  | This        |',
+      '>     | ----- | ----------- |',
+      '>     | Davey | Builder     |',
+      '> ```',
+    ].join('\n');
+
+    expect(
+      normalizeMarkdownTables(markdown, {
+        markdownTableFencedCode: 'markdown',
+      }),
+    ).toBe(markdown);
   });
 
   test('given fenced code contains blockquote list table text, when normalizing, then leaves the code unchanged', () => {

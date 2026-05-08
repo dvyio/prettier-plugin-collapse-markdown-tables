@@ -5,37 +5,58 @@
 import type { UncheckedNormalizeMarkdownTablesOptions } from './types.js';
 
 import {
+  DEFAULT_MARKDOWN_TABLE_FENCED_CODE,
   DEFAULT_MARKDOWN_TABLE_STYLE,
+  MARKDOWN_TABLE_FENCED_CODE_OPTIONS,
   MARKDOWN_TABLE_STYLE_OPTIONS,
+  type MarkdownTableFencedCode,
   type MarkdownTableStyle,
 } from './publicTypes.js';
 
 const NORMALIZE_MARKDOWN_TABLES_OPTION_KEYS = [
   'enableMdxEsm',
   'enableMdxJsx',
+  'markdownTableFencedCode',
   'markdownTableStyle',
   'maxInputBytes',
   'rangeEnd',
   'rangeStart',
 ] as const;
 const NORMALIZE_MARKDOWN_TABLES_OPTION_KEYS_LABEL =
-  '"enableMdxEsm", "enableMdxJsx", "markdownTableStyle", "maxInputBytes", "rangeEnd", or "rangeStart"';
-const MARKDOWN_TABLE_STYLE_VALUES_LABEL = MARKDOWN_TABLE_STYLE_OPTIONS.map(
-  ({ value }) => `"${value}"`,
-).reduce((label, value, index, values) => {
-  if (index === 0) {
-    return value;
-  }
-
-  if (index === values.length - 1) {
-    return `${label}, or ${value}`;
-  }
-
-  return `${label}, ${value}`;
-});
+  '"enableMdxEsm", "enableMdxJsx", "markdownTableFencedCode", "markdownTableStyle", "maxInputBytes", "rangeEnd", or "rangeStart"';
+const MARKDOWN_TABLE_FENCED_CODE_VALUES_LABEL = formatOptionValuesLabel(
+  MARKDOWN_TABLE_FENCED_CODE_OPTIONS,
+);
+const MARKDOWN_TABLE_STYLE_VALUES_LABEL = formatOptionValuesLabel(
+  MARKDOWN_TABLE_STYLE_OPTIONS,
+);
 
 type NormalizeMarkdownTablesOptionKey =
   (typeof NORMALIZE_MARKDOWN_TABLES_OPTION_KEYS)[number];
+
+function formatOptionValuesLabel(
+  options: ReadonlyArray<{ readonly value: string }>,
+): string {
+  const quotedValues = options.map(({ value }) => `"${value}"`);
+  let label = '';
+
+  for (const [index, value] of quotedValues.entries()) {
+    if (index === 0) {
+      label = value;
+      continue;
+    }
+
+    if (index === quotedValues.length - 1) {
+      const separator = quotedValues.length === 2 ? ' or ' : ', or ';
+      label = `${label}${separator}${value}`;
+      continue;
+    }
+
+    label = `${label}, ${value}`;
+  }
+
+  return label;
+}
 
 /**
  * Reads helper options from unknown caller input without running getters.
@@ -64,6 +85,10 @@ export function readNormalizeMarkdownTablesOptions(
   return {
     enableMdxEsm: readBooleanNormalizeOption(value, 'enableMdxEsm'),
     enableMdxJsx: readBooleanNormalizeOption(value, 'enableMdxJsx'),
+    markdownTableFencedCode: readOwnDataOption(
+      value,
+      'markdownTableFencedCode',
+    ),
     markdownTableStyle: readOwnDataOption(value, 'markdownTableStyle'),
     maxInputBytes: readMaxInputBytesOption(value),
     rangeEnd: readOwnDataOption(value, 'rangeEnd'),
@@ -140,6 +165,39 @@ function isNormalizeMarkdownTablesOptionsRecord(
   value: unknown,
 ): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Returns the requested fenced-code behavior, defaulting to `protected` when no option is set.
+ *
+ * @param value - raw `markdownTableFencedCode` option value.
+ * @returns the checked fenced-code behavior to use.
+ * @throws Error when the value is not one of the supported fenced-code choices.
+ */
+export function parseMarkdownTableFencedCode(
+  value: unknown,
+): MarkdownTableFencedCode {
+  if (value === undefined) {
+    return DEFAULT_MARKDOWN_TABLE_FENCED_CODE;
+  }
+
+  if (isMarkdownTableFencedCode(value)) {
+    return value;
+  }
+
+  throw new Error(
+    `Invalid markdownTableFencedCode "${describeUnknownValue(
+      value,
+    )}" — expected ${MARKDOWN_TABLE_FENCED_CODE_VALUES_LABEL}.`,
+  );
+}
+
+function isMarkdownTableFencedCode(
+  value: unknown,
+): value is MarkdownTableFencedCode {
+  return MARKDOWN_TABLE_FENCED_CODE_OPTIONS.some(
+    (option) => option.value === value,
+  );
 }
 
 /**

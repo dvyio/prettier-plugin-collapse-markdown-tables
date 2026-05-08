@@ -2,6 +2,26 @@
  * @fileoverview Shares Markdown table types used by the public helper API.
  */
 
+/** Fenced-code choices accepted by the Prettier plugin and standalone normalizer. */
+export const MARKDOWN_TABLE_FENCED_CODE_OPTIONS = [
+  {
+    description: 'Keep fenced code blocks unchanged.',
+    value: 'protected',
+  },
+  {
+    description: 'Collapse tables inside Markdown-like fenced code blocks.',
+    value: 'markdown',
+  },
+] as const;
+
+/** Fenced-code choices accepted by the Prettier plugin and standalone normalizer. */
+export type MarkdownTableFencedCode =
+  (typeof MARKDOWN_TABLE_FENCED_CODE_OPTIONS)[number]['value'];
+
+/** Fenced-code behavior used when callers do not choose one. */
+export const DEFAULT_MARKDOWN_TABLE_FENCED_CODE: MarkdownTableFencedCode =
+  MARKDOWN_TABLE_FENCED_CODE_OPTIONS[0].value;
+
 /** Table style choices accepted by the Prettier plugin and standalone normalizer. */
 export const MARKDOWN_TABLE_STYLE_OPTIONS = [
   {

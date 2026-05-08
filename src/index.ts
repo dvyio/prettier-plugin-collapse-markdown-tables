@@ -16,11 +16,14 @@ import { builders, printer as docPrinter } from 'prettier/doc';
 import * as prettierMarkdownPlugin from 'prettier/plugins/markdown';
 
 import {
+  type MarkdownTableFencedCode,
   type MarkdownTableStyle,
   normalizeMarkdownTables,
 } from './normalizeMarkdownTables.js';
 import {
+  DEFAULT_MARKDOWN_TABLE_FENCED_CODE,
   DEFAULT_MARKDOWN_TABLE_STYLE,
+  MARKDOWN_TABLE_FENCED_CODE_OPTIONS,
   MARKDOWN_TABLE_STYLE_OPTIONS,
 } from './normalizer/publicTypes.js';
 import { mayContainMarkdownTableCandidate } from './normalizer/tableRows.js';
@@ -39,6 +42,7 @@ import {
 
 export { normalizeMarkdownTables };
 export type {
+  MarkdownTableFencedCode,
   MarkdownTableStyle,
   NormalizeMarkdownTablesOptions,
   ParsedMarkdownTableRow,
@@ -47,6 +51,8 @@ export type {
 
 declare module 'prettier' {
   interface Options {
+    /** Fenced-code table behavior used by @dvyio/prettier-plugin-collapse-markdown-tables. */
+    readonly markdownTableFencedCode?: MarkdownTableFencedCode;
     /** Markdown table style used by @dvyio/prettier-plugin-collapse-markdown-tables. */
     readonly markdownTableStyle?: MarkdownTableStyle;
   }
@@ -87,6 +93,18 @@ const parsers: Record<MarkdownParserName, Parser<MarkdownNode>> = {
 };
 
 const pluginOptions: SupportOptions = {
+  markdownTableFencedCode: {
+    category: 'Markdown',
+    choices: MARKDOWN_TABLE_FENCED_CODE_OPTIONS.map(
+      ({ description, value }) => ({
+        description,
+        value,
+      }),
+    ),
+    default: DEFAULT_MARKDOWN_TABLE_FENCED_CODE,
+    description: 'Markdown table behavior inside fenced code blocks.',
+    type: 'choice',
+  },
   markdownTableStyle: {
     category: 'Markdown',
     choices: MARKDOWN_TABLE_STYLE_OPTIONS.map(({ description, value }) => ({
@@ -114,19 +132,22 @@ const printers: Record<'mdast', Printer<MarkdownNode>> = {
         return printed;
       }
 
-      const pluginOptions = readMarkdownPluginOptions(options);
+      const markdownOptions = readMarkdownPluginOptions(options);
 
-      if (pluginOptions.parentParser !== undefined) {
+      if (markdownOptions.parentParser !== undefined) {
         forgetPreprocessedMarkdown(options);
         return printed;
       }
 
-      if (pluginOptions.markdownTableStyle === 'prettier') {
+      if (markdownOptions.markdownTableStyle === 'prettier') {
         forgetPreprocessedMarkdown(options);
         return printed;
       }
 
-      if (!hasMarkdownTableNode(path.node)) {
+      if (
+        !hasMarkdownTableNode(path.node) &&
+        markdownOptions.markdownTableFencedCode === 'protected'
+      ) {
         forgetPreprocessedMarkdown(options);
         return printed;
       }
@@ -380,7 +401,7 @@ function normalizeMarkdownTablesInRequestedRange(
 }
 
 /**
- * Adds `markdownTableStyle` to Prettier's Markdown, MDX, and remark parsers.
+ * Adds Markdown table options to Prettier's Markdown, MDX, and remark parsers.
  */
 const plugin: Plugin<MarkdownNode> = {
   options: pluginOptions,

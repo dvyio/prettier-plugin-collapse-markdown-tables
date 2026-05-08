@@ -103,9 +103,9 @@ Do not call `require("@dvyio/prettier-plugin-collapse-markdown-tables")` from Co
 
 ### Plugin Ordering
 
-This plugin must be the active Markdown printer. It wraps Prettier's built-in Markdown printer, checks Prettier's Markdown AST for table nodes, then rewrites the final Markdown text only when the parsed document contains a table.
+This plugin must be the active Markdown printer. It wraps Prettier's built-in Markdown printer, checks whether the document can contain tables, then rewrites the final Markdown text.
 
-That final rewrite is an adapter boundary. Prettier owns Markdown and MDX parsing. This plugin owns a smaller post-print table pass, and it runs only after Prettier has already proved the document has Markdown table nodes. That keeps this package small, but it means parser wrapping, protected regions, range formatting, cursor mapping, and package compatibility need focused tests.
+That final rewrite is an adapter boundary. Prettier owns Markdown and MDX parsing. This plugin owns a smaller post-print table pass. That keeps this package small, but it means parser wrapping, protected regions, range formatting, cursor mapping, and package compatibility need focused tests.
 
 If another plugin also registers a Markdown `mdast` printer, only one printer runs. This plugin does not compose with that printer or use its custom output. It always wraps Prettier's built-in Markdown printer.
 
@@ -196,6 +196,26 @@ After:
 | Davey | Builder |
 ```
 
+### `markdownTableFencedCode: "protected"`
+
+This is the default. It keeps all fenced code blocks unchanged by this plugin.
+
+Prettier may still format embedded languages before this plugin runs.
+
+### `markdownTableFencedCode: "markdown"`
+
+This collapses tables inside Markdown-like fenced code blocks. It applies to fences marked `markdown`, `md`, `mdx`, or `gfm`.
+
+Use this when your docs include Markdown examples that should use the same table style as the rest of the file.
+
+```json
+{
+  "plugins": ["@dvyio/prettier-plugin-collapse-markdown-tables"],
+  "markdownTableStyle": "spaced",
+  "markdownTableFencedCode": "markdown"
+}
+```
+
 ## Supported Contexts
 
 The plugin normalizes normal Markdown tables at the root of a document, inside list items, inside blockquotes, inside mixed blockquote/list nesting, and inside footnotes parsed by Prettier's Markdown parser.
@@ -234,7 +254,7 @@ Maintainer setup, focused test commands, stress-test rules, fixture rules, and P
 
 After Prettier prints the document, this plugin leaves these regions unchanged:
 
-- fenced code blocks
+- fenced code blocks, unless `markdownTableFencedCode` is set to `markdown` and the fence language is `markdown`, `md`, `mdx`, or `gfm`
 - indented code blocks
 - front matter, including YAML closed with `---` or `...`
 - HTML comments
@@ -243,7 +263,7 @@ After Prettier prints the document, this plugin leaves these regions unchanged:
 - tables after `<!-- prettier-ignore -->`
 - tables inside `<!-- prettier-ignore-start -->` and `<!-- prettier-ignore-end -->`
 
-That does not always mean the original input is kept byte for byte. Prettier may still format embedded languages before this plugin runs. For example, Prettier can align a Markdown table inside a `markdown` code fence, but this plugin will not collapse that fenced table to the configured table style.
+That does not always mean the original input is kept byte for byte. Prettier may still format embedded languages before this plugin runs. For example, Prettier can align a Markdown table inside a `markdown` code fence. Set `markdownTableFencedCode` to `markdown` when you want this plugin to collapse that fenced table too.
 
 For regions Prettier itself leaves alone, the collapse pass also leaves them alone. For example:
 
@@ -296,6 +316,7 @@ The helper scans the whole string it receives. If you use it in a server or with
 Helper options:
 
 - `markdownTableStyle`: defaults to `'spaced'`. Use `'spaced'` for one space inside each cell, `'compact'` for no cell padding, or `'prettier'` to return the input unchanged.
+- `markdownTableFencedCode`: defaults to `'protected'`. Use `'markdown'` to rewrite tables inside fences marked `markdown`, `md`, `mdx`, or `gfm`.
 - `maxInputBytes`: defaults to no helper-level limit. This rejects input whose UTF-8 size is larger than the limit. Use it for untrusted input, and set it to the same limit your service allows.
 - `rangeStart`: defaults to `0` when `rangeEnd` is set. This is the start offset for the part of the input that may be rewritten. The value must be an integer from `0` through `markdown.length`.
 - `rangeEnd`: defaults to `markdown.length` when `rangeStart` is set. This is the end offset for the part of the input that may be rewritten. Use `Number.POSITIVE_INFINITY` to mean the end of the input.

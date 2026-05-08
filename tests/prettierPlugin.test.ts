@@ -409,6 +409,119 @@ describe('prettier plugin', () => {
     );
   });
 
+  test('given Markdown fenced code is enabled, when formatting, then collapses fenced Markdown tables', async () => {
+    const fencedMarkdown = [
+      '```markdown',
+      '| Name  | Role        |',
+      '| ----- | ----------- |',
+      '| Davey | Builder     |',
+      '```',
+      '',
+    ].join('\n');
+
+    await expect(
+      prettier.format(fencedMarkdown, {
+        markdownTableFencedCode: 'markdown',
+        parser: 'markdown',
+        plugins: [plugin],
+      }),
+    ).resolves.toBe(
+      [
+        '```markdown',
+        '| Name | Role |',
+        '| --- | --- |',
+        '| Davey | Builder |',
+        '```',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  test('given Markdown fenced code is enabled and followed by a table, when formatting, then collapses both tables', async () => {
+    const fencedMarkdown = [
+      '```markdown',
+      '| Name  | Role        |',
+      '| ----- | ----------- |',
+      '| Davey | Builder     |',
+      '```',
+      '',
+      '| Goal  | Owner       |',
+      '| ----- | ----------- |',
+      '| Ship  | Team        |',
+      '',
+    ].join('\n');
+
+    await expect(
+      prettier.format(fencedMarkdown, {
+        markdownTableFencedCode: 'markdown',
+        parser: 'markdown',
+        plugins: [plugin],
+      }),
+    ).resolves.toBe(
+      [
+        '```markdown',
+        '| Name | Role |',
+        '| --- | --- |',
+        '| Davey | Builder |',
+        '```',
+        '',
+        '| Goal | Owner |',
+        '| --- | --- |',
+        '| Ship | Team |',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  test('given Markdown fenced code contains a non-Markdown nested fence, when formatting, then the nested fence stays unchanged', async () => {
+    const fencedMarkdown = [
+      '````markdown',
+      '```text',
+      '| Name  | Role        |',
+      '| ----- | ----------- |',
+      '| Davey | Builder     |',
+      '```',
+      '````',
+      '',
+    ].join('\n');
+
+    await expect(
+      prettier.format(fencedMarkdown, {
+        markdownTableFencedCode: 'markdown',
+        parser: 'markdown',
+        plugins: [plugin],
+      }),
+    ).resolves.toBe(fencedMarkdown);
+  });
+
+  test('given Markdown fenced code has fence-indented table rows, when formatting, then collapses the fenced table', async () => {
+    const fencedMarkdown = [
+      '   ```markdown',
+      '    | Name  | Role        |',
+      '    | ----- | ----------- |',
+      '    | Davey | Builder     |',
+      '   ```',
+      '',
+    ].join('\n');
+
+    await expect(
+      prettier.format(fencedMarkdown, {
+        markdownTableFencedCode: 'markdown',
+        parser: 'markdown',
+        plugins: [plugin],
+      }),
+    ).resolves.toBe(
+      [
+        '```markdown',
+        '| Name | Role |',
+        '| --- | --- |',
+        '| Davey | Builder |',
+        '```',
+        '',
+      ].join('\n'),
+    );
+  });
+
   test('given the Markdown plugin loads before this plugin, when formatting, then this plugin is the active printer', async () => {
     await expect(
       prettier.format(markdown, {

@@ -5,6 +5,7 @@
 import type { ParserOptions } from 'prettier';
 
 import type {
+  MarkdownTableFencedCode,
   MarkdownTableStyle,
   NormalizeMarkdownTablesOptions,
 } from './normalizeMarkdownTables.js';
@@ -15,6 +16,7 @@ import {
 } from './normalizer/lineUtils.js';
 import {
   describeUnknownValue,
+  parseMarkdownTableFencedCode,
   parseMarkdownTableStyle,
   readOwnDataOption,
 } from './normalizer/options.js';
@@ -25,6 +27,7 @@ import {
 } from './prettierRangeState.js';
 
 type MarkdownPluginOptions = {
+  readonly markdownTableFencedCode: MarkdownTableFencedCode;
   readonly markdownTableStyle: MarkdownTableStyle;
   readonly parentParser?: string | undefined;
   readonly parser?: string | undefined;
@@ -35,6 +38,7 @@ type MarkdownPluginOptions = {
 type MutableNormalizeMarkdownTablesOptions = {
   enableMdxEsm?: boolean;
   enableMdxJsx?: boolean;
+  markdownTableFencedCode?: MarkdownTableFencedCode;
   markdownTableStyle?: MarkdownTableStyle;
   rangeEnd?: number;
   rangeStart?: number;
@@ -50,6 +54,9 @@ export function readMarkdownPluginOptions(
   const markdownTableStyle = parseMarkdownTableStyle(
     readOwnDataOption(options, 'markdownTableStyle'),
   );
+  const markdownTableFencedCode = parseMarkdownTableFencedCode(
+    readOwnDataOption(options, 'markdownTableFencedCode'),
+  );
   const rangeEnd = readOptionalNumberPluginOption(options, 'rangeEnd');
   const rangeStart = readOptionalNumberPluginOption(options, 'rangeStart');
 
@@ -61,6 +68,7 @@ export function readMarkdownPluginOptions(
   }
 
   return {
+    markdownTableFencedCode,
     markdownTableStyle,
     parentParser: readOptionalStringPluginOption(options, 'parentParser'),
     parser: readOptionalStringPluginOption(options, 'parser'),
@@ -185,6 +193,10 @@ function getBaseNormalizeOptions(
 
   if (options.markdownTableStyle !== undefined) {
     normalizeOptions.markdownTableStyle = options.markdownTableStyle;
+  }
+
+  if (options.markdownTableFencedCode !== undefined) {
+    normalizeOptions.markdownTableFencedCode = options.markdownTableFencedCode;
   }
 
   return normalizeOptions;

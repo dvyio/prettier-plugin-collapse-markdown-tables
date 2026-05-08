@@ -16,6 +16,18 @@ The supported Prettier line is Prettier `3.x`. The test suite checks the packed 
 
 Parser-behaviour changes need a changelog entry when they affect which table-shaped text is rewritten, which regions are protected, or how range and cursor offsets map after formatting. If a change can alter a user's Markdown output, it belongs here.
 
+## 0.2.0 - 2026-05-08
+
+### Added
+
+- Added `markdownTableFencedCode: "markdown"` to collapse tables inside fenced code blocks marked `markdown`, `md`, `mdx`, or `gfm`.
+- Kept `markdownTableFencedCode: "protected"` as the default so fenced code blocks stay unchanged unless callers opt in.
+
+### Fixed
+
+- Kept nested non-Markdown fences protected inside enabled Markdown fences.
+- Kept indented code protected inside enabled Markdown fences, including blockquoted and indented fence examples.
+
 ## 0.1.1 - 2026-05-06
 
 ### Fixed
