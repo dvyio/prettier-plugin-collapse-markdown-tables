@@ -112,6 +112,6 @@
     "prettier-3-0": "npm:prettier@3.0.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.59.1",
-    "vitest": "4.1.5"
+    "vitest": "4.1.6"
   }
 }
