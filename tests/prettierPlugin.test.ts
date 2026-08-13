@@ -4651,27 +4651,31 @@ describe('prettier plugin', () => {
     LARGE_PLUGIN_FORMAT_TIMEOUT_MS + PERFORMANCE_TEST_TIMEOUT_BUFFER_MS,
   );
 
-  test('given a wide table has a Prettier-widened delimiter, when formatting with the plugin, then recovery stays fast and collapses the padding', async () => {
-    const padding = ' '.repeat(4_000);
-    const rows = Array.from(
-      { length: 400 },
-      (_, index) =>
-        `| ROW-${String(index)}${padding}| Note ${String(index)}${padding}| [ ]${padding}|`,
-    );
-    rows[200] = `| ROW-200${padding}| Retired \`G-15 | 200\`, \`G-16 | 200\`, and \`G-23 | 200\`${padding}| [ ]${padding}|`;
-    const source = [
-      `| ID${padding}| Notes${padding}| Fixed${padding}|`,
-      `| ---${padding}| ---${padding}| ---${padding}| ---${padding}| ---${padding}| ---${padding}|`,
-      ...rows,
-      '',
-    ].join('\n');
-    const pluginOutput = await expectFastPluginFormat(source, 'markdown');
+  test(
+    'given a wide table has a Prettier-widened delimiter, when formatting with the plugin, then recovery stays fast and collapses the padding',
+    async () => {
+      const padding = ' '.repeat(4_000);
+      const rows = Array.from(
+        { length: 400 },
+        (_, index) =>
+          `| ROW-${String(index)}${padding}| Note ${String(index)}${padding}| [ ]${padding}|`,
+      );
+      rows[200] = `| ROW-200${padding}| Retired \`G-15 | 200\`, \`G-16 | 200\`, and \`G-23 | 200\`${padding}| [ ]${padding}|`;
+      const source = [
+        `| ID${padding}| Notes${padding}| Fixed${padding}|`,
+        `| ---${padding}| ---${padding}| ---${padding}| ---${padding}| ---${padding}| ---${padding}|`,
+        ...rows,
+        '',
+      ].join('\n');
+      const pluginOutput = await expectFastPluginFormat(source, 'markdown');
 
-    expect(pluginOutput).toContain(
-      '| ROW-200 | Retired `G-15 \\| 200`, `G-16 \\| 200`, and `G-23 \\| 200` | [ ] |',
-    );
-    expect(pluginOutput.length).toBeLessThan(source.length / 10);
-  });
+      expect(pluginOutput).toContain(
+        '| ROW-200 | Retired `G-15 \\| 200`, `G-16 \\| 200`, and `G-23 \\| 200` | [ ] |',
+      );
+      expect(pluginOutput.length).toBeLessThan(source.length / 10);
+    },
+    LARGE_PLUGIN_FORMAT_TIMEOUT_MS + PERFORMANCE_TEST_TIMEOUT_BUFFER_MS,
+  );
 
   test('given a large Markdown file with tables, when formatting in a memory-limited process, then retained heap stays bounded', () => {
     const script = `

@@ -50,6 +50,7 @@ Built with TypeScript, Prettier, Vitest, esbuild, ESLint, Knip, and Husky. Check
 - Compatibility tests must not pin whitespace or adjacent mdast text-node splits that belong to Prettier. Compute built-in output with the installed version, then assert this plugin's style, protected text, table meaning, and idempotence.
 - Use the audit checklist before changing parser wrapping, range handling, protected-region scanning, table repair, rendering, packaging, or fixture coverage.
 - Keep stress-only performance assertions behind `NORMALIZE_MARKDOWN_TABLES_STRESS=1`. Normal checks should catch hangs without failing on benchmark noise.
+- Give plugin performance tests an outer Vitest timeout longer than their internal formatter deadline. Coverage instrumentation can exceed Vitest's five-second default before the real deadline runs.
 
 ## Formatting And Dogfood
 
