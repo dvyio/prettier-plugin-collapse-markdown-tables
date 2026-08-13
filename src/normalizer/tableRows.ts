@@ -487,7 +487,6 @@ function scanTableCells(
 ): CellScanResult {
   const cells: Array<string> = [];
   const delimiterPositions: Array<MarkdownOffset> = [];
-  let current = '';
   let codeSpanIndex = 0;
   let index = 0;
 
@@ -496,6 +495,7 @@ function scanTableCells(
   }
 
   index++;
+  let cellStart = index;
 
   while (index < content.length) {
     const char = content[index];
@@ -503,8 +503,6 @@ function scanTableCells(
     if (char === undefined) {
       break;
     }
-
-    const nextChar = content[index + 1];
 
     while (codeSpanIndex < codeSpans.spans.length) {
       const nextCodeSpan = codeSpans.spans[codeSpanIndex];
@@ -524,19 +522,6 @@ function scanTableCells(
       index < codeSpan.end;
 
     if (
-      mode === 'trusted' &&
-      !isInCodeSpan &&
-      char === '\\' &&
-      nextChar !== undefined &&
-      isEscapedTableChar(nextChar) &&
-      isMarkdownEscapedCharacter(content, index + 1)
-    ) {
-      current += `\\${nextChar}`;
-      index += 2;
-      continue;
-    }
-
-    if (
       char === '|' &&
       !isInCodeSpan &&
       !isMarkdownEscapedCharacter(content, index)
@@ -546,26 +531,21 @@ function scanTableCells(
       }
 
       delimiterPositions.push(toMarkdownOffset(index));
-      cells.push(current);
-      current = '';
+      cells.push(content.slice(cellStart, index));
       index++;
+      cellStart = index;
       continue;
     }
 
-    current += char;
     index++;
   }
 
-  cells.push(current);
+  cells.push(content.slice(cellStart, index));
 
   return {
     cells,
     delimiterPositions,
   };
-}
-
-function isEscapedTableChar(value: string): boolean {
-  return value === '|' || value === '`';
 }
 
 function isPipedRowAtLine(
@@ -660,6 +640,22 @@ function isValidDelimiterCell(cell: string): boolean {
   return hyphenCount >= 3 || (hasAlignmentMarker && cell.length >= 3);
 }
 
+/** Returns the column count only when every cell is a valid table delimiter. */
+export function getValidDelimiterColumnCount(
+  cells: ReadonlyArray<string>,
+): ColumnCount | undefined {
+  const delimiterCells = cells.map((cell) => cell.trim());
+
+  if (
+    delimiterCells.length === 0 ||
+    !delimiterCells.every(isValidDelimiterCell)
+  ) {
+    return undefined;
+  }
+
+  return toColumnCount(delimiterCells.length);
+}
+
 function hasValidDelimiterRow(
   header: ParsedTableRow,
   delimiter: ParsedTableRow,
@@ -682,22 +678,17 @@ export function getValidTableColumnCount(
     return undefined;
   }
 
-  const delimiterCells = delimiter.fragments.map((cell) => cell.trim());
+  const expectedColumns = getValidDelimiterColumnCount(delimiter.fragments);
 
-  if (
-    delimiterCells.length === 0 ||
-    !delimiterCells.every(isValidDelimiterCell)
-  ) {
+  if (expectedColumns === undefined) {
     return undefined;
   }
 
-  const expectedColumns = toColumnCount(delimiterCells.length);
-
-  if (header.cells.length === delimiterCells.length) {
+  if (header.cells.length === expectedColumns) {
     return expectedColumns;
   }
 
-  if (header.fragments.length <= delimiterCells.length) {
+  if (header.fragments.length <= expectedColumns) {
     return undefined;
   }
 

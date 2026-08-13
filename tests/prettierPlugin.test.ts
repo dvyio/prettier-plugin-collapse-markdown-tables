@@ -121,7 +121,7 @@ type StderrMatcher = (stderr: string) => boolean;
 
 type AllowedStderr = StderrMatcher | string;
 
-type FixtureParser = 'markdown' | 'mdx';
+type FixtureParser = 'markdown' | 'mdx' | 'remark';
 
 type FormatFixture = {
   readonly fileName: string;
@@ -214,6 +214,18 @@ type UnknownFunction = (...args: ReadonlyArray<unknown>) => unknown;
 type SeededRandom = {
   readonly next: () => number;
 };
+
+type SemanticFuzzCell = {
+  readonly source: string;
+  readonly validSource: string;
+};
+
+type SemanticFuzzTable = {
+  readonly source: string;
+  readonly validSource: string;
+};
+
+type SemanticFuzzOuterPipes = 'both' | 'leading' | 'none' | 'trailing';
 
 const FIXTURE_STYLES: ReadonlyArray<MarkdownTableStyle> = [
   'spaced',
@@ -340,6 +352,526 @@ describe('prettier plugin', () => {
         '',
       ].join('\n'),
     );
+  });
+
+  test('given inline-code pipes in a table cell, when formatting, then escapes them before parsing and stays stable', async () => {
+    const source = [
+      '| ID | Notes | Fixed |',
+      '| --- | --- | --- |',
+      '| BIOQ-1247 | Retired `G-15|abc`, `G-16|abc`, and `G-23|xyz` | [ ] |',
+      '',
+    ].join('\n');
+    const expected = [
+      '| ID | Notes | Fixed |',
+      '| --- | --- | --- |',
+      '| BIOQ-1247 | Retired `G-15\\|abc`, `G-16\\|abc`, and `G-23\\|xyz` | [ ] |',
+      '',
+    ].join('\n');
+    const formatted = await prettier.format(source, {
+      parser: 'markdown',
+      plugins: [plugin],
+    });
+    const formattedAgain = await prettier.format(formatted, {
+      parser: 'markdown',
+      plugins: [plugin],
+    });
+
+    expect(formatted).toBe(expected);
+    expect(formattedAgain).toBe(expected);
+  });
+
+  test('given Prettier already widened a table delimiter from inline-code pipes, when formatting, then restores the intended columns and stays stable', async () => {
+    const source = [
+      '| ID | Notes | Fixed |',
+      '| --- | --- | --- | --- | --- | --- |',
+      '| BIOQ-1247 | Retired `G-15 | abc`, `G-16 | abc`, and `G-23 | xyz` | [ ] |',
+      '',
+    ].join('\n');
+    const styleCases = [
+      {
+        expected: [
+          '| ID | Notes | Fixed |',
+          '| --- | --- | --- |',
+          '| BIOQ-1247 | Retired `G-15 \\| abc`, `G-16 \\| abc`, and `G-23 \\| xyz` | [ ] |',
+          '',
+        ].join('\n'),
+        style: 'spaced',
+      },
+      {
+        expected: [
+          '|ID|Notes|Fixed|',
+          '|---|---|---|',
+          '|BIOQ-1247|Retired `G-15 \\| abc`, `G-16 \\| abc`, and `G-23 \\| xyz`|[ ]|',
+          '',
+        ].join('\n'),
+        style: 'compact',
+      },
+    ] as const;
+    const parsers = ['markdown', 'mdx', 'remark'] as const;
+
+    for (const parser of parsers) {
+      for (const styleCase of styleCases) {
+        const label = `${parser} ${styleCase.style}`;
+        const formatted = await prettier.format(source, {
+          markdownTableStyle: styleCase.style,
+          parser,
+          plugins: [plugin],
+        });
+        const formattedAgain = await prettier.format(formatted, {
+          markdownTableStyle: styleCase.style,
+          parser,
+          plugins: [plugin],
+        });
+        const [table] = await parseTableSemantics(formatted, parser);
+
+        expect(formatted, label).toBe(styleCase.expected);
+        expect(formattedAgain, label).toBe(styleCase.expected);
+        expect(
+          table?.rows.map((row) => row.length),
+          label,
+        ).toEqual([3, 3]);
+      }
+    }
+  });
+
+  test('given a mismatched delimiter lacks complete inline-code evidence, when formatting, then leaves it to Prettier', async () => {
+    const cases = [
+      {
+        label: 'real extra body cell',
+        source: [
+          '| ID | Notes |',
+          '| --- | --- | --- |',
+          '| one | `a | b` |',
+          '| two | real | extra |',
+          '',
+        ].join('\n'),
+      },
+      {
+        label: 'unclosed code span',
+        source: [
+          '| ID | Notes |',
+          '| --- | --- | --- |',
+          '| one | `a | b |',
+          '',
+        ].join('\n'),
+      },
+      {
+        label: 'no code-pipe witness',
+        source: [
+          '| ID | Notes |',
+          '| --- | --- | --- |',
+          '| one | plain |',
+          '',
+        ].join('\n'),
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const prettierOutput = await prettier.format(testCase.source, {
+        parser: 'markdown',
+        plugins: [prettierMarkdownPlugin],
+      });
+      const actual = await prettier.format(testCase.source, {
+        parser: 'markdown',
+        plugins: [plugin],
+      });
+
+      expect(actual, testCase.label).toBe(
+        normalizeMarkdownTables(prettierOutput),
+      );
+    }
+  });
+
+  test('given GFM tables use each outer-pipe shape, when formatting, then repairs every valid shape', async () => {
+    const cases = [
+      {
+        label: 'fully wrapped',
+        source: ['| ID | Note |', '| --- | --- |', '| one | `a|b` |', ''].join(
+          '\n',
+        ),
+      },
+      {
+        label: 'bare',
+        source: ['ID | Note', '--- | ---', 'one | `a|b`', ''].join('\n'),
+      },
+      {
+        label: 'leading only',
+        source: ['| ID | Note', '| --- | ---', '| one | `a|b`', ''].join('\n'),
+      },
+      {
+        label: 'trailing only',
+        source: ['ID | Note |', '--- | --- |', 'one | `a|b` |', ''].join('\n'),
+      },
+      {
+        label: 'wrapped header and bare body',
+        source: ['| ID | Note |', '| --- | --- |', 'one | `a|b`', ''].join(
+          '\n',
+        ),
+      },
+    ] as const;
+    const styleCases = [
+      {
+        expected: [
+          '| ID | Note |',
+          '| --- | --- |',
+          '| one | `a\\|b` |',
+          '',
+        ].join('\n'),
+        style: 'spaced',
+      },
+      {
+        expected: ['|ID|Note|', '|---|---|', '|one|`a\\|b`|', ''].join('\n'),
+        style: 'compact',
+      },
+    ] as const;
+    const parsers = ['markdown', 'mdx', 'remark'] as const;
+
+    for (const tableCase of cases) {
+      for (const parser of parsers) {
+        for (const styleCase of styleCases) {
+          const label = `${tableCase.label} ${parser} ${styleCase.style}`;
+          const formatted = await prettier.format(tableCase.source, {
+            markdownTableStyle: styleCase.style,
+            parser,
+            plugins: [plugin],
+          });
+          const formattedAgain = await prettier.format(formatted, {
+            markdownTableStyle: styleCase.style,
+            parser,
+            plugins: [plugin],
+          });
+          const [table] = await parseTableSemantics(formatted, parser);
+
+          expect(formatted, label).toBe(styleCase.expected);
+          expect(formattedAgain, label).toBe(styleCase.expected);
+          expect(
+            table?.rows.map((row) => row.length),
+            label,
+          ).toEqual([2, 2]);
+        }
+      }
+    }
+  });
+
+  test('given one-column tables use valid optional outer pipes, when formatting, then repairs them without treating leading-only rows as tables', async () => {
+    const acceptedCases = [
+      {
+        expected: ['| Note |', '| --- |', '| `a\\|b` |', ''].join('\n'),
+        label: 'trailing outer pipe',
+        source: ['Note |', '--- |', '`a|b` |', ''].join('\n'),
+      },
+      {
+        expected: ['| Note |', '| --- |', '| `a\\|b` |', ''].join('\n'),
+        label: 'both outer pipes',
+        source: ['| Note |', '| --- |', '| `a|b` |', ''].join('\n'),
+      },
+      {
+        expected: ['| `a\\|b` |', '| --- |', '| value |', ''].join('\n'),
+        label: 'header code pipe',
+        source: ['`a|b`', '--- |', 'value |', ''].join('\n'),
+      },
+    ] as const;
+
+    for (const acceptedCase of acceptedCases) {
+      await expect(
+        prettier.format(acceptedCase.source, {
+          parser: 'markdown',
+          plugins: [plugin],
+        }),
+        acceptedCase.label,
+      ).resolves.toBe(acceptedCase.expected);
+    }
+
+    const leadingOnly = ['| Note', '| ---', '| `a|b`', ''].join('\n');
+    const prettierOutput = await prettier.format(leadingOnly, {
+      parser: 'markdown',
+      plugins: [prettierMarkdownPlugin],
+    });
+
+    await expect(
+      prettier.format(leadingOnly, {
+        parser: 'markdown',
+        plugins: [plugin],
+      }),
+    ).resolves.toBe(prettierOutput);
+  });
+
+  test('given mixed inline-code pipes, when formatting with each Markdown parser and style, then keeps three columns and the original code text', async () => {
+    const source = [
+      '| ID | Notes | Fixed |',
+      '| --- | --- | --- |',
+      '| ONE | One `a|b` value | [ ] |',
+      '| TWO | Starts `|first`, ends `last|`, and keeps plain\\|text | [x] |',
+      '',
+    ].join('\n');
+    const styleCases = [
+      {
+        expected: [
+          '| ID | Notes | Fixed |',
+          '| --- | --- | --- |',
+          '| ONE | One `a\\|b` value | [ ] |',
+          '| TWO | Starts `\\|first`, ends `last\\|`, and keeps plain\\|text | [x] |',
+          '',
+        ].join('\n'),
+        style: 'spaced',
+      },
+      {
+        expected: [
+          '|ID|Notes|Fixed|',
+          '|---|---|---|',
+          '|ONE|One `a\\|b` value|[ ]|',
+          '|TWO|Starts `\\|first`, ends `last\\|`, and keeps plain\\|text|[x]|',
+          '',
+        ].join('\n'),
+        style: 'compact',
+      },
+    ] as const;
+    const parsers = ['markdown', 'mdx', 'remark'] as const;
+
+    for (const parser of parsers) {
+      for (const styleCase of styleCases) {
+        const label = `${parser} ${styleCase.style}`;
+        const formatted = await prettier.format(source, {
+          markdownTableStyle: styleCase.style,
+          parser,
+          plugins: [plugin],
+        });
+        const formattedAgain = await prettier.format(formatted, {
+          markdownTableStyle: styleCase.style,
+          parser,
+          plugins: [plugin],
+        });
+        const [table] = await parseTableSemantics(formatted, parser);
+
+        expect(formatted, label).toBe(styleCase.expected);
+        expect(formattedAgain, label).toBe(styleCase.expected);
+        expect(
+          table?.rows.map((row) => row.length),
+          label,
+        ).toEqual([3, 3, 3]);
+        expect(formatted.replaceAll('\\|', '|'), label).toContain(
+          'Starts `|first`, ends `last|`, and keeps plain|text',
+        );
+      }
+    }
+  });
+
+  test('given an unclosed inline-code span with a pipe, when formatting, then does not guess a repair', async () => {
+    const source = [
+      '| Name | Note |',
+      '| --- | --- |',
+      '| Davey | `Builder|Writer |',
+      '',
+    ].join('\n');
+    const prettierOutput = await prettier.format(source, {
+      parser: 'markdown',
+      plugins: [prettierMarkdownPlugin],
+    });
+    const pluginOutput = await prettier.format(source, {
+      parser: 'markdown',
+      plugins: [plugin],
+    });
+
+    expect(pluginOutput).toBe(prettierOutput);
+    expect(pluginOutput).not.toContain('`Builder\\|Writer`');
+  });
+
+  test('given prettier style and an inline-code pipe, when formatting, then preserves the table semantics with Prettier alignment', async () => {
+    const source = [
+      '| ID | Note |',
+      '| --- | --- |',
+      '| one | `a|b` |',
+      '',
+    ].join('\n');
+    const validSource = source.replace('`a|b`', '`a\\|b`');
+    const expected = await prettier.format(validSource, {
+      parser: 'markdown',
+      plugins: [prettierMarkdownPlugin],
+    });
+    const formatted = await prettier.format(source, {
+      markdownTableStyle: 'prettier',
+      parser: 'markdown',
+      plugins: [plugin],
+    });
+    const formattedAgain = await prettier.format(formatted, {
+      markdownTableStyle: 'prettier',
+      parser: 'markdown',
+      plugins: [plugin],
+    });
+
+    expect(formatted).toBe(expected);
+    expect(formattedAgain).toBe(expected);
+  });
+
+  test('given backslash parity and CommonMark code-span shapes, when formatting, then escapes only ambiguous code pipes', async () => {
+    const slash = '\\';
+    const source = [
+      `| \`Head|Code\` | Note |`,
+      '| --- | --- |',
+      `| one | \`a${slash}|b\` |`,
+      `| two | \`a${slash.repeat(2)}|b\` |`,
+      '| three | ``a`|b`` |',
+      '| four | `|a||b|` |',
+      '',
+    ].join('\n');
+    const validSource = [
+      `| \`Head${slash}|Code\` | Note |`,
+      '| --- | --- |',
+      `| one | \`a${slash}|b\` |`,
+      `| two | \`a${slash.repeat(3)}|b\` |`,
+      `| three | \`\`a\`${slash}|b\`\` |`,
+      `| four | \`${slash}|a${slash}|${slash}|b${slash}|\` |`,
+      '',
+    ].join('\n');
+    const expectedTables = await parseTableSemantics(validSource, 'markdown');
+    const formatted = await prettier.format(source, {
+      parser: 'markdown',
+      plugins: [plugin],
+    });
+    const validFormatted = await prettier.format(validSource, {
+      parser: 'markdown',
+      plugins: [plugin],
+    });
+    const formattedAgain = await prettier.format(formatted, {
+      parser: 'markdown',
+      plugins: [plugin],
+    });
+
+    expect(formatted).toBe(validFormatted);
+    expect(formattedAgain).toBe(formatted);
+    expect(await parseTableSemantics(formatted, 'markdown')).toEqual(
+      expectedTables,
+    );
+    expect(formatted).toContain(`\`a${slash}|b\``);
+    expect(formatted).toContain(`\`a${slash.repeat(3)}|b\``);
+  });
+
+  test('given a bare table header starts with a three-backtick code span, when formatting, then does not mistake it for a fence', async () => {
+    const source = [
+      '```code ``a|b`` tail``` | Note',
+      ':--- | ---:',
+      'header | value',
+      '',
+    ].join('\n');
+    const validSource = source.replace('a|b', 'a\\|b');
+    const expectedTables = await parseTableSemantics(validSource, 'markdown');
+    const formatted = await prettier.format(source, {
+      parser: 'markdown',
+      plugins: [plugin],
+    });
+    const validFormatted = await prettier.format(validSource, {
+      parser: 'markdown',
+      plugins: [plugin],
+    });
+
+    expect(formatted).toBe(validFormatted);
+    expect(await parseTableSemantics(formatted, 'markdown')).toEqual(
+      expectedTables,
+    );
+  });
+
+  test('given Markdown protected regions contain raw code pipes, when formatting, then changes only the eligible table', async () => {
+    const source = [
+      '```text',
+      '| ID | Note |',
+      '| --- | --- |',
+      '| fence | `fence|pipe` |',
+      '```',
+      '',
+      '<!-- prettier-ignore -->',
+      '| ID | Note |',
+      '| --- | --- |',
+      '| ignore | `ignore|pipe` |',
+      '',
+      '<!-- prettier-ignore-start -->',
+      '| ID | Note |',
+      '| --- | --- |',
+      '| range | `range|pipe` |',
+      '<!-- prettier-ignore-end -->',
+      '',
+      '<!--',
+      '| ID | Note |',
+      '| --- | --- |',
+      '| comment | `comment|pipe` |',
+      '-->',
+      '',
+      '<pre>',
+      '| ID | Note |',
+      '| --- | --- |',
+      '| html | `html|pipe` |',
+      '</pre>',
+      '',
+      '| ID | Note |',
+      '| --- | --- |',
+      '| eligible | `eligible|pipe` |',
+      '',
+    ].join('\n');
+    const validSource = source.replace('`eligible|pipe`', '`eligible\\|pipe`');
+    const expected = await prettier.format(validSource, {
+      parser: 'markdown',
+      plugins: [prettierMarkdownPlugin],
+    });
+    const formatted = await prettier.format(source, {
+      markdownTableStyle: 'prettier',
+      parser: 'markdown',
+      plugins: [plugin],
+    });
+    const formattedAgain = await prettier.format(formatted, {
+      markdownTableStyle: 'prettier',
+      parser: 'markdown',
+      plugins: [plugin],
+    });
+
+    expect(formatted).toBe(expected);
+    expect(formattedAgain).toBe(formatted);
+    expect(formatted).toContain('`fence|pipe`');
+    expect(formatted).toContain('`ignore|pipe`');
+    expect(formatted).toContain('`range|pipe`');
+    expect(formatted).toContain('`comment|pipe`');
+    expect(formatted).toContain('`html|pipe`');
+    expect(formatted).toContain('`eligible\\|pipe`');
+  });
+
+  test('given MDX JSX and ESM contain raw code pipes, when formatting, then changes only the eligible table', async () => {
+    const source = [
+      'export const tableRows = [',
+      '  "| ID | Note |",',
+      '  "| --- | --- |",',
+      '  "| esm | `esm|pipe` |",',
+      '];',
+      '',
+      '<Demo>',
+      '  | ID | Note |',
+      '  | --- | --- |',
+      '  | jsx | `jsx|pipe` |',
+      '</Demo>',
+      '',
+      '| ID | Note |',
+      '| --- | --- |',
+      '| eligible | `eligible|pipe` |',
+      '',
+    ].join('\n');
+    const validSource = source.replace('`eligible|pipe`', '`eligible\\|pipe`');
+    const expected = await prettier.format(validSource, {
+      parser: 'mdx',
+      plugins: [prettierMarkdownPlugin],
+    });
+    const formatted = await prettier.format(source, {
+      markdownTableStyle: 'prettier',
+      parser: 'mdx',
+      plugins: [plugin],
+    });
+    const formattedAgain = await prettier.format(formatted, {
+      markdownTableStyle: 'prettier',
+      parser: 'mdx',
+      plugins: [plugin],
+    });
+
+    expect(formatted).toBe(expected);
+    expect(formattedAgain).toBe(formatted);
+    expect(formatted).toContain('`esm|pipe`');
+    expect(formatted).toContain('`jsx|pipe`');
+    expect(formatted).toContain('`eligible\\|pipe`');
   });
 
   test('given Prettier shortens aligned separator cells, when formatting Markdown, then it still collapses the table', async () => {
@@ -1802,6 +2334,69 @@ describe('prettier plugin', () => {
     expect(result.formatted).toBe(expected);
   });
 
+  test('given adjacent inline-code pipes and exact range boundaries, when preprocessing, then maps cursor and range offsets between complete escapes', () => {
+    const markdown = [
+      '| ID | Note |',
+      '| --- | --- |',
+      '| one | `a||b` |',
+      '',
+    ].join('\n');
+    const expected = [
+      '| ID | Note |',
+      '| --- | --- |',
+      '| one | `a\\|\\|b` |',
+      '',
+    ].join('\n');
+    const sourceCodeStart = markdown.indexOf('a||b');
+    const expectedCodeStart = expected.indexOf('a\\|\\|b');
+    const boundaries = [
+      { expectedDelta: 1, label: 'before', sourceDelta: 1 },
+      { expectedDelta: 3, label: 'between', sourceDelta: 2 },
+      { expectedDelta: 5, label: 'after', sourceDelta: 3 },
+    ] as const;
+    const parser = plugin.parsers?.markdown;
+
+    if (parser?.preprocess === undefined) {
+      throw new Error('Expected the Markdown parser preprocess hook to exist.');
+    }
+
+    const preprocess: unknown = parser.preprocess;
+
+    if (!isUnknownFunction(preprocess)) {
+      throw new Error(
+        'Expected the Markdown parser preprocess hook to be callable.',
+      );
+    }
+
+    for (const boundary of boundaries) {
+      const sourceOffset = sourceCodeStart + boundary.sourceDelta;
+      const expectedOffset = expectedCodeStart + boundary.expectedDelta;
+      const options: {
+        cursorOffset: number;
+        locEnd: () => number;
+        locStart: () => number;
+        originalText: string;
+        rangeEnd: number;
+        rangeStart: number;
+      } & prettier.Options = {
+        cursorOffset: sourceOffset,
+        locEnd: () => 0,
+        locStart: () => 0,
+        markdownTableStyle: 'prettier',
+        originalText: markdown,
+        parser: 'markdown',
+        plugins: [plugin],
+        rangeEnd: sourceOffset,
+        rangeStart: sourceOffset,
+      };
+
+      expect(preprocess(markdown, options), boundary.label).toBe(expected);
+      expect(options.cursorOffset, boundary.label).toBe(expectedOffset);
+      expect(options.rangeEnd, boundary.label).toBe(expectedOffset);
+      expect(options.rangeStart, boundary.label).toBe(expectedOffset);
+    }
+  });
+
   test('given one options object is reused after a parser-printer handoff, when the source text changes, then stale source is ignored', async () => {
     const beforeTable = [
       '| Before  | Table       |',
@@ -2302,6 +2897,103 @@ describe('prettier plugin', () => {
     });
   }
 
+  test('given a range inside a table with an inline-code pipe, when formatting, then escapes and collapses only that table', async () => {
+    const beforeTable = [
+      '| Before  | Table       |',
+      '| ------- | ----------- |',
+      '| keep    | as written  |',
+    ].join('\n');
+    const selectedTable = [
+      '| ID        | Note          |',
+      '| --------- | ------------- |',
+      '| BIOQ-1247 | `G-15|abc`    |',
+    ].join('\n');
+    const afterTable = [
+      '| After   | Table       |',
+      '| ------- | ----------- |',
+      '| keep    | as written  |',
+    ].join('\n');
+    const rangedMarkdown = [
+      beforeTable,
+      '',
+      selectedTable,
+      '',
+      afterTable,
+      '',
+    ].join('\n');
+    const rangeStart = rangedMarkdown.indexOf('G-15');
+    const rangeEnd = rangeStart + 'G-15|abc'.length;
+
+    await expect(
+      prettier.format(rangedMarkdown, {
+        parser: 'markdown',
+        plugins: [plugin],
+        rangeEnd,
+        rangeStart,
+      }),
+    ).resolves.toBe(
+      [
+        beforeTable,
+        '',
+        '| ID | Note |',
+        '| --- | --- |',
+        '| BIOQ-1247 | `G-15\\|abc` |',
+        '',
+        afterTable,
+        '',
+      ].join('\n'),
+    );
+  });
+
+  test('given ranges before, between, and after adjacent inline-code pipes, when formatting, then only the selected table changes', async () => {
+    const beforeTable = [
+      '| Before  | Table       |',
+      '| ------- | ----------- |',
+      '| keep    | as written  |',
+    ].join('\n');
+    const selectedTable = [
+      '| ID        | Note          |',
+      '| --------- | ------------- |',
+      '| one       | `a||b`        |',
+    ].join('\n');
+    const afterTable = [
+      '| After   | Table       |',
+      '| ------- | ----------- |',
+      '| keep    | as written  |',
+    ].join('\n');
+    const rangedMarkdown = [
+      beforeTable,
+      '',
+      selectedTable,
+      '',
+      afterTable,
+      '',
+    ].join('\n');
+    const expected = [
+      beforeTable,
+      '',
+      '| ID | Note |',
+      '| --- | --- |',
+      '| one | `a\\|\\|b` |',
+      '',
+      afterTable,
+      '',
+    ].join('\n');
+    const codeStart = rangedMarkdown.indexOf('a||b');
+
+    for (const rangeDelta of [1, 2, 3]) {
+      await expect(
+        prettier.format(rangedMarkdown, {
+          parser: 'markdown',
+          plugins: [plugin],
+          rangeEnd: codeStart + rangeDelta + 1,
+          rangeStart: codeStart + rangeDelta,
+        }),
+        `range boundary ${String(rangeDelta)}`,
+      ).resolves.toBe(expected);
+    }
+  });
+
   test('given a selected table shrinks during preprocessing, when formatting a range, then neighboring tables stay unchanged', async () => {
     const padding = ' '.repeat(80);
     const beforeTable = [
@@ -2553,6 +3245,72 @@ describe('prettier plugin', () => {
 
     expect(result.cursorOffset).toBe(
       result.formatted.indexOf('Target') + 'Target'.length,
+    );
+  });
+
+  test('given a cursor before, between, or after adjacent inline-code pipes, when formatting with cursor, then keeps each logical boundary', async () => {
+    const cursorMarkdown = [
+      '| ID | Note |',
+      '| --- | --- |',
+      '| one | `a||b` |',
+      '',
+    ].join('\n');
+    const expected = [
+      '| ID | Note |',
+      '| --- | --- |',
+      '| one | `a\\|\\|b` |',
+      '',
+    ].join('\n');
+    const sourceCodeStart = cursorMarkdown.indexOf('a||b');
+    const expectedCodeStart = expected.indexOf('a\\|\\|b');
+    const boundaries = [
+      { expectedDelta: 1, label: 'before', sourceDelta: 1 },
+      { expectedDelta: 3, label: 'between', sourceDelta: 2 },
+      { expectedDelta: 5, label: 'after', sourceDelta: 3 },
+    ] as const;
+
+    for (const boundary of boundaries) {
+      const result = await prettier.formatWithCursor(cursorMarkdown, {
+        cursorOffset: sourceCodeStart + boundary.sourceDelta,
+        parser: 'markdown',
+        plugins: [plugin],
+      });
+
+      expect(result.formatted, boundary.label).toBe(expected);
+      expect(result.cursorOffset, boundary.label).toBe(
+        expectedCodeStart + boundary.expectedDelta,
+      );
+    }
+  });
+
+  test('given CRLF text has several code pipes and literal backslashes, when formatting with cursor, then maps past every inserted backslash exactly', async () => {
+    const literalBackslashes = '\\'.repeat(2);
+    const sourceCursorText = `e${literalBackslashes}|f`;
+    const expectedCursorText = `e${literalBackslashes}\\|f`;
+    const cursorMarkdown = [
+      '| ID | Note |',
+      '| --- | --- |',
+      `| one | \`a|b\`, \`c||d\`, and \`${sourceCursorText}\` |`,
+      '',
+    ].join('\r\n');
+    const cursorOffset =
+      cursorMarkdown.indexOf(sourceCursorText) +
+      sourceCursorText.indexOf('|') +
+      1;
+    const result = await prettier.formatWithCursor(cursorMarkdown, {
+      cursorOffset,
+      endOfLine: 'crlf',
+      parser: 'markdown',
+      plugins: [plugin],
+    });
+
+    expect(result.formatted).toContain('`a\\|b`, `c\\|\\|d`');
+    expect(result.formatted).toContain(`\`${expectedCursorText}\``);
+    expect(result.formatted).toContain('\r\n');
+    expect(result.cursorOffset).toBe(
+      result.formatted.indexOf(expectedCursorText) +
+        expectedCursorText.indexOf('|') +
+        1,
     );
   });
 
@@ -3126,6 +3884,39 @@ describe('prettier plugin', () => {
     );
   });
 
+  test('given prettier-ignore before a bare table with an inline-code pipe, when formatting, then leaves it byte-for-byte and repairs the next table', async () => {
+    const ignoredTable = [
+      '<!-- prettier-ignore -->',
+      'ID | Note',
+      '--- | ---',
+      'one | `a|b`',
+      '',
+      'ID | Note',
+      '--- | ---',
+      'two | `c|d`',
+      '',
+    ].join('\n');
+
+    await expect(
+      prettier.format(ignoredTable, {
+        parser: 'markdown',
+        plugins: [plugin],
+      }),
+    ).resolves.toBe(
+      [
+        '<!-- prettier-ignore -->',
+        'ID | Note',
+        '--- | ---',
+        'one | `a|b`',
+        '',
+        '| ID | Note |',
+        '| --- | --- |',
+        '| two | `c\\|d` |',
+        '',
+      ].join('\n'),
+    );
+  });
+
   test('given MDX prettier-ignore before a Markdown table, when formatting, then leaves that table unchanged', async () => {
     const ignoredTable = [
       '<!-- prettier-ignore -->',
@@ -3456,19 +4247,12 @@ describe('prettier plugin', () => {
     );
   });
 
-  test('given seeded generated inline tables, when formatting, then table AST semantics match built-in Prettier', async () => {
+  test('given seeded generated inline tables, when formatting, then table AST semantics match valid GFM source', async () => {
     const random = createSeededRandom(PRETTIER_SEMANTIC_FUZZ_SEED);
 
     for (let index = 0; index < 16; index++) {
-      const source = createSemanticFuzzTable(random, index);
-      const prettierOutput = await prettier.format(source, {
-        parser: 'markdown',
-        plugins: [prettierMarkdownPlugin],
-      });
-      const prettierTables = await parseTableSemantics(
-        prettierOutput,
-        'markdown',
-      );
+      const { source, validSource } = createSemanticFuzzTable(random, index);
+      const expectedTables = await parseTableSemantics(validSource, 'markdown');
       const spacedOutput = await formatWithPlugin(source, 'markdown', 'spaced');
       const compactOutput = await formatWithPlugin(
         source,
@@ -3480,21 +4264,38 @@ describe('prettier plugin', () => {
         compactOutput,
         'markdown',
       );
+      const spacedOutputAgain = await formatWithPlugin(
+        spacedOutput,
+        'markdown',
+        'spaced',
+      );
+      const compactOutputAgain = await formatWithPlugin(
+        compactOutput,
+        'markdown',
+        'compact',
+      );
 
       if (
-        JSON.stringify(spacedTables) !== JSON.stringify(prettierTables) ||
-        JSON.stringify(compactTables) !== JSON.stringify(prettierTables)
+        JSON.stringify(spacedTables) !== JSON.stringify(expectedTables) ||
+        JSON.stringify(compactTables) !== JSON.stringify(expectedTables)
       ) {
         throw new Error(
           [
             `Table semantics changed for seed ${PRETTIER_SEMANTIC_FUZZ_SEED} case ${index}.`,
             source,
-            JSON.stringify(prettierTables),
+            JSON.stringify(expectedTables),
             JSON.stringify(spacedTables),
             JSON.stringify(compactTables),
           ].join('\n---\n'),
         );
       }
+
+      expect(spacedOutputAgain, `spaced seed case ${String(index)}`).toBe(
+        spacedOutput,
+      );
+      expect(compactOutputAgain, `compact seed case ${String(index)}`).toBe(
+        compactOutput,
+      );
     }
   });
 
@@ -3635,11 +4436,11 @@ describe('prettier plugin', () => {
         ].join('\n'),
       },
       {
-        label: 'code span pipe',
+        label: 'unclosed code span pipe',
         source: [
           '| Name | Note |',
           '| --- | --- |',
-          '| Davey | `Builder | Writer` |',
+          '| Davey | `Builder | Writer |',
         ].join('\n'),
       },
     ];
@@ -3775,6 +4576,47 @@ describe('prettier plugin', () => {
     expect(pluginOutput).toContain('| Davey 399 | Builder |');
   });
 
+  test('given a large table has inline-code pipes, when formatting with the plugin, then the pre-parser stays fast and keeps three columns', async () => {
+    const rows = Array.from(
+      { length: 3_300 },
+      (_, index) =>
+        `| BIOQ-${String(index)} | Retired \`G-15|${String(index)}\`, kept \`G-16\\|${String(index)}\`, and moved \`G-23|${String(index)}\` | [ ] |`,
+    );
+    const source = [
+      '| ID | Notes | Fixed |',
+      '| --- | --- | --- |',
+      ...rows,
+      '',
+    ].join('\n');
+    const pluginOutput = await expectFastPluginFormat(source, 'markdown');
+
+    expect(pluginOutput).toContain(
+      '| BIOQ-3299 | Retired `G-15\\|3299`, kept `G-16\\|3299`, and moved `G-23\\|3299` | [ ] |',
+    );
+  });
+
+  test('given a wide table has a Prettier-widened delimiter, when formatting with the plugin, then recovery stays fast and collapses the padding', async () => {
+    const padding = ' '.repeat(4_000);
+    const rows = Array.from(
+      { length: 400 },
+      (_, index) =>
+        `| ROW-${String(index)}${padding}| Note ${String(index)}${padding}| [ ]${padding}|`,
+    );
+    rows[200] = `| ROW-200${padding}| Retired \`G-15 | 200\`, \`G-16 | 200\`, and \`G-23 | 200\`${padding}| [ ]${padding}|`;
+    const source = [
+      `| ID${padding}| Notes${padding}| Fixed${padding}|`,
+      `| ---${padding}| ---${padding}| ---${padding}| ---${padding}| ---${padding}| ---${padding}|`,
+      ...rows,
+      '',
+    ].join('\n');
+    const pluginOutput = await expectFastPluginFormat(source, 'markdown');
+
+    expect(pluginOutput).toContain(
+      '| ROW-200 | Retired `G-15 \\| 200`, `G-16 \\| 200`, and `G-23 \\| 200` | [ ] |',
+    );
+    expect(pluginOutput.length).toBeLessThan(source.length / 10);
+  });
+
   test('given a large Markdown file with tables, when formatting in a memory-limited process, then retained heap stays bounded', () => {
     const script = `
       import * as prettier from 'prettier';
@@ -3783,9 +4625,21 @@ describe('prettier plugin', () => {
       const source = Array.from({ length: 300 }, (_, index) => [
         \`Section \${String(index)}\`,
         '',
-        '| Name  | Role        |',
-        '| ----- | ----------- |',
-        \`| Davey \${String(index)} | Builder     |\`,
+        '| Name  | Notes                |',
+        '| ----- | -------------------- |',
+        '| Davey {index} | \`raw|{index}\` and \`kept\\\\|{index}\` |'.replaceAll(
+          '{index}',
+          String(index),
+        ),
+        '',
+        '\`\`\`text',
+        '| Protected | Note |',
+        '| --- | --- |',
+        '| row {index} | \`protected|{index}\` |'.replaceAll(
+          '{index}',
+          String(index),
+        ),
+        '\`\`\`',
         '',
       ].join('\\n')).join('\\n');
 
@@ -3800,8 +4654,13 @@ describe('prettier plugin', () => {
       global.gc();
       const retainedHeapBytes = process.memoryUsage().heapUsed - beforeHeap;
 
-      if (!formatted.includes('| Davey 299 | Builder |')) {
+      if (!formatted.includes('| Davey 299 | \`raw\\\\|299\` and \`kept\\\\|299\` |')) {
         console.error('Expected the large table file to be formatted.');
+        process.exit(1);
+      }
+
+      if (!formatted.includes('\`protected|299\`')) {
+        console.error('Expected protected code pipes to remain unchanged.');
         process.exit(1);
       }
 
@@ -4901,33 +5760,115 @@ function pick<T>(
 function createSemanticFuzzTable(
   random: SeededRandom,
   caseIndex: number,
-): string {
+): SemanticFuzzTable {
   const alignments = [
-    { delimiter: '---', label: 'Plain' },
-    { delimiter: ':---', label: 'Left' },
-    { delimiter: ':---:', label: 'Center' },
-    { delimiter: '---:', label: 'Right' },
+    { alignment: 'plain', label: 'Plain' },
+    { alignment: 'left', label: 'Left' },
+    { alignment: 'center', label: 'Center' },
+    { alignment: 'right', label: 'Right' },
   ] as const;
+  const outerPipeShapes: ReadonlyArray<SemanticFuzzOuterPipes> = [
+    'both',
+    'leading',
+    'none',
+    'trailing',
+  ];
   const columnCount = 3 + randomInt(random, 3);
   const selectedAlignments = Array.from({ length: columnCount }, () =>
     pick(random, alignments, 'alignment'),
   );
-  const header = selectedAlignments.map(
-    (alignment, index) => `${alignment.label} ${caseIndex}-${index}`,
+  const header = selectedAlignments.map((alignment, index) => {
+    if (caseIndex % 4 === 0 && index === 0) {
+      return createSemanticFuzzCodeValue(
+        random,
+        `header-${caseIndex}-${index}`,
+      );
+    }
+
+    return semanticFuzzCell(`${alignment.label} ${caseIndex}-${index}`);
+  });
+  const delimiters = selectedAlignments.map((alignment) =>
+    createSemanticFuzzDelimiter(random, alignment.alignment),
   );
   const rows = Array.from({ length: 2 + randomInt(random, 3) }, (_, rowIndex) =>
     Array.from({ length: columnCount }, (_unused, columnIndex) =>
       createSemanticFuzzCell(random, caseIndex, rowIndex, columnIndex),
     ),
   );
+  const headerOuterPipes = pick(random, outerPipeShapes, 'header outer pipes');
+  const delimiterOuterPipes = pick(
+    random,
+    outerPipeShapes,
+    'delimiter outer pipes',
+  );
+  const rowOuterPipes = rows.map(() =>
+    pick(random, outerPipeShapes, 'body outer pipes'),
+  );
 
-  return [
-    `| ${header.join(' | ')} |`,
-    `| ${selectedAlignments
-      .map((alignment) => alignment.delimiter)
-      .join(' | ')} |`,
-    ...rows.map((row) => `| ${row.join(' | ')} |`),
-  ].join('\n');
+  return {
+    source: [
+      wrapSemanticFuzzRow(
+        header.map((cell) => cell.source),
+        headerOuterPipes,
+      ),
+      wrapSemanticFuzzRow(delimiters, delimiterOuterPipes),
+      ...rows.map((row, index) =>
+        wrapSemanticFuzzRow(
+          row.map((cell) => cell.source),
+          rowOuterPipes[index] ?? 'both',
+        ),
+      ),
+    ].join('\n'),
+    validSource: [
+      wrapSemanticFuzzRow(
+        header.map((cell) => cell.validSource),
+        headerOuterPipes,
+      ),
+      wrapSemanticFuzzRow(delimiters, delimiterOuterPipes),
+      ...rows.map((row, index) =>
+        wrapSemanticFuzzRow(
+          row.map((cell) => cell.validSource),
+          rowOuterPipes[index] ?? 'both',
+        ),
+      ),
+    ].join('\n'),
+  };
+}
+
+function wrapSemanticFuzzRow(
+  cells: ReadonlyArray<string>,
+  outerPipes: SemanticFuzzOuterPipes,
+): string {
+  const content = cells.join(' | ');
+
+  switch (outerPipes) {
+    case 'both':
+      return `| ${content} |`;
+    case 'leading':
+      return `| ${content}`;
+    case 'none':
+      return content;
+    case 'trailing':
+      return `${content} |`;
+  }
+}
+
+function createSemanticFuzzDelimiter(
+  random: SeededRandom,
+  alignment: 'center' | 'left' | 'plain' | 'right',
+): string {
+  const hyphens = '-'.repeat(3 + randomInt(random, 5));
+
+  switch (alignment) {
+    case 'center':
+      return `:${hyphens}:`;
+    case 'left':
+      return `:${hyphens}`;
+    case 'plain':
+      return hyphens;
+    case 'right':
+      return `${hyphens}:`;
+  }
 }
 
 function createSemanticFuzzCell(
@@ -4935,18 +5876,49 @@ function createSemanticFuzzCell(
   caseIndex: number,
   rowIndex: number,
   columnIndex: number,
-): string {
+): SemanticFuzzCell {
   const token = `${caseIndex}-${rowIndex}-${columnIndex}`;
   const cells = [
-    `plain ${token}`,
-    `\`code ${token} | pipe\``,
-    `*em ${token}*`,
-    `[link ${token}](https://example.com/${token} "Title ${token}")`,
-    String.raw`escaped\|pipe`,
-    `**strong ${token}**`,
+    semanticFuzzCell(`plain ${token}`),
+    createSemanticFuzzCodeValue(random, token),
+    semanticFuzzCell(`*em ${token}*`),
+    semanticFuzzCell(
+      `[link ${token}](https://example.com/${token} "Title ${token}")`,
+    ),
+    semanticFuzzCell(String.raw`escaped\|pipe`),
+    semanticFuzzCell(`**strong ${token}**`),
   ];
 
   return pick(random, cells, 'cell');
+}
+
+function createSemanticFuzzCodeValue(
+  random: SeededRandom,
+  token: string,
+): SemanticFuzzCell {
+  const delimiterLength = 1 + randomInt(random, 3);
+  const delimiter = '`'.repeat(delimiterLength);
+  const internalDelimiter = '`'.repeat(randomInt(random, delimiterLength));
+  const pipeCount = 1 + randomInt(random, 3);
+  const backslashCount = randomInt(random, 5);
+  const backslashes = '\\'.repeat(backslashCount);
+  const sourcePipes = `${backslashes}${'|'.repeat(pipeCount)}`;
+  let validPipes = backslashes;
+
+  if (backslashCount % 2 === 0) {
+    validPipes += '\\';
+  }
+
+  validPipes += `|${'\\|'.repeat(pipeCount - 1)}`;
+
+  return {
+    source: `${delimiter}code ${token} ${internalDelimiter}${sourcePipes} tail${delimiter}`,
+    validSource: `${delimiter}code ${token} ${internalDelimiter}${validPipes} tail${delimiter}`,
+  };
+}
+
+function semanticFuzzCell(source: string): SemanticFuzzCell {
+  return { source, validSource: source };
 }
 
 function isTableRowNode(node: unknown): node is Record<string, unknown> {
@@ -5698,6 +6670,32 @@ function runPackagedPluginSmokeTest(directory: string): CliResult {
 
     if (formatted !== '| A | B |\\n| --- | --- |\\n| one | two |\\n') {
       console.error(formatted);
+      process.exit(1);
+    }
+
+    const codeDelimiter = String.fromCharCode(96);
+    const inlineCodePipeSource =
+      '| ID | Note |\\n| --- | --- |\\n| one | ' +
+      codeDelimiter +
+      'a|b' +
+      codeDelimiter +
+      ' |\\n';
+    const inlineCodePipeExpected =
+      '| ID | Note |\\n| --- | --- |\\n| one | ' +
+      codeDelimiter +
+      'a\\\\|b' +
+      codeDelimiter +
+      ' |\\n';
+    const inlineCodePipeFormatted = await prettier.format(
+      inlineCodePipeSource,
+      {
+        parser: 'markdown',
+        plugins: [plugin],
+      },
+    );
+
+    if (inlineCodePipeFormatted !== inlineCodePipeExpected) {
+      console.error(inlineCodePipeFormatted);
       process.exit(1);
     }
 

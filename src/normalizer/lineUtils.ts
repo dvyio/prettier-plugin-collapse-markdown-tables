@@ -411,8 +411,12 @@ export function isCompatibleContainerKey(
     return true;
   }
 
-  if (!startKey.endsWith('/list')) {
+  if (startKey !== 'list' && !startKey.endsWith('/list')) {
     return false;
+  }
+
+  if (startKey === 'list') {
+    return key === ROOT_CONTAINER_KEY || key.startsWith('indent');
   }
 
   const parentKey = startKey.slice(0, -'/list'.length);

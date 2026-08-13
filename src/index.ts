@@ -19,7 +19,12 @@ import {
   type MarkdownTableFencedCode,
   type MarkdownTableStyle,
   normalizeMarkdownTables,
+  type NormalizeMarkdownTablesOptions,
 } from './normalizeMarkdownTables.js';
+import {
+  escapeMarkdownTableCodeSpanPipes,
+  repairPrettierWidenedTableDelimiters,
+} from './normalizer/prettierParse.js';
 import {
   DEFAULT_MARKDOWN_TABLE_FENCED_CODE,
   DEFAULT_MARKDOWN_TABLE_STYLE,
@@ -36,7 +41,8 @@ import {
 import {
   forgetPreprocessedMarkdown,
   readKnownMarkdownSource,
-  remapPrettierRangeStateAfterPreprocess,
+  remapPrettierRangeStateAfterInsertions,
+  remapPrettierRangeStateAfterLinePreservingPreprocess,
   rememberPreprocessedMarkdown,
 } from './prettierRangeState.js';
 
@@ -181,7 +187,14 @@ function normalizePrintedMarkdownThroughAdapter(
       pluginOptions.parser === 'mdx',
       pluginOptions.parser === 'mdx',
     );
-    const normalized = normalizeMarkdownTables(formatted, normalizeOptions);
+    const repaired = shouldRepairPrintedMarkdown(normalizeOptions)
+      ? repairPrettierWidenedTableDelimiters(formatted, normalizeOptions)
+      : formatted;
+    const escaped =
+      repaired === formatted
+        ? formatted
+        : escapeMarkdownTableCodeSpanPipes(repaired, normalizeOptions).markdown;
+    const normalized = normalizeMarkdownTables(escaped, normalizeOptions);
 
     if (normalized === formatted) {
       return printed;
@@ -191,6 +204,12 @@ function normalizePrintedMarkdownThroughAdapter(
   } finally {
     forgetPreprocessedMarkdown(options);
   }
+}
+
+function shouldRepairPrintedMarkdown(
+  options: NormalizeMarkdownTablesOptions,
+): boolean {
+  return options.rangeEnd === undefined && options.rangeStart === undefined;
 }
 
 function hasMarkdownTableNode(node: MarkdownNode): boolean {
@@ -377,24 +396,50 @@ function normalizeMarkdownTablesInRequestedRange(
 
   if (
     pluginOptions.parentParser !== undefined ||
-    pluginOptions.markdownTableStyle === 'prettier' ||
-    !mayContainMarkdownTableCandidate(markdown) ||
-    !isPartialMarkdownPluginRangeFormat(pluginOptions, markdown.length)
+    !mayContainMarkdownTableCandidate(markdown)
   ) {
     return markdown;
   }
 
-  const normalized = normalizeMarkdownTables(
+  const normalizeOptions = getPreprocessedNormalizeOptions(
+    pluginOptions,
     markdown,
-    getPreprocessedNormalizeOptions(
-      pluginOptions,
-      markdown,
-      enableMdxEsm,
-      enableMdxJsx,
-    ),
+    enableMdxEsm,
+    enableMdxJsx,
+  );
+  const escaped = escapeMarkdownTableCodeSpanPipes(markdown, normalizeOptions);
+  remapPrettierRangeStateAfterInsertions(
+    options,
+    markdown,
+    escaped.insertedBackslashOffsets,
   );
 
-  remapPrettierRangeStateAfterPreprocess(options, markdown, normalized);
+  let normalized = escaped.markdown;
+
+  if (
+    pluginOptions.markdownTableStyle !== 'prettier' &&
+    isPartialMarkdownPluginRangeFormat(pluginOptions, markdown.length)
+  ) {
+    const escapedPluginOptions = readMarkdownPluginOptions(
+      options,
+      escaped.markdown.length,
+    );
+    normalized = normalizeMarkdownTables(
+      escaped.markdown,
+      getPreprocessedNormalizeOptions(
+        escapedPluginOptions,
+        escaped.markdown,
+        enableMdxEsm,
+        enableMdxJsx,
+      ),
+    );
+    remapPrettierRangeStateAfterLinePreservingPreprocess(
+      options,
+      escaped.markdown,
+      normalized,
+    );
+  }
+
   rememberPreprocessedMarkdown(options, markdown, normalized);
 
   return normalized;

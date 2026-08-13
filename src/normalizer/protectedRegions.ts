@@ -82,6 +82,14 @@ type ProtectedLineRange = {
   readonly start: number;
 };
 
+/** Markdown container content plus its start offset in the source line. */
+type ParsedContainerLine = {
+  readonly content: string;
+  readonly contentStart: number;
+  readonly key: ContainerKey;
+  readonly startsListItem: boolean;
+};
+
 type EnabledMarkdownFenceLines = {
   readonly delimiterLines: ReadonlyArray<boolean>;
   readonly endLines: ReadonlyArray<number | undefined>;
@@ -651,9 +659,11 @@ function applyProtectedRanges(
   }
 }
 
-function parseContainerLine(line: string): ContainerLine {
+/** Splits one Markdown line into its container prefix and visible content. */
+export function parseContainerLine(line: string): ParsedContainerLine {
   const parts: Array<string> = [];
   let offset = 0;
+  let startsListItem = false;
 
   while (offset < line.length) {
     const blockquoteEnd = parseContainerBlockquoteEnd(line, offset);
@@ -669,6 +679,7 @@ function parseContainerLine(line: string): ContainerLine {
     if (listItemEnd !== undefined) {
       parts.push('list');
       offset = listItemEnd;
+      startsListItem = true;
       continue;
     }
 
@@ -685,7 +696,9 @@ function parseContainerLine(line: string): ContainerLine {
 
   return {
     content: line.slice(offset),
+    contentStart: offset,
     key: toContainerKey(parts.join('/')),
+    startsListItem,
   };
 }
 
@@ -931,7 +944,8 @@ function findTablesInsideIgnoredBlockRanges(
   return ranges;
 }
 
-function parsePrettierIgnoreDirective(
+/** Reads a standalone Prettier ignore directive from container content. */
+export function parsePrettierIgnoreDirective(
   line: string | undefined,
 ): PrettierIgnoreDirective | undefined {
   if (line === undefined) {
@@ -1303,6 +1317,10 @@ function parseFenceStart(line: string): FenceStart | undefined {
   const length = countRun(line, indent.offset, char);
 
   if (length < 3) {
+    return undefined;
+  }
+
+  if (char === '`' && line.slice(indent.offset + length).includes('`')) {
     return undefined;
   }
 

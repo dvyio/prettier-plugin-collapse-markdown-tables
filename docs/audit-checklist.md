@@ -21,7 +21,9 @@ Files:
 
 Checklist:
 
-- Parser wrapping keeps Prettier's original `rangeStart`, `rangeEnd`, and `cursorOffset` attached to the same logical text after preprocessing.
+- Parser wrapping keeps Prettier's original `rangeStart`, `rangeEnd`, and `cursorOffset` attached to the same logical text after preprocessing. Known insertions use exact original UTF-16 offsets. Line-local mapping is limited to transforms that preserve line boundaries.
+- Parser preprocessing escapes inline-code pipes only in safe table rows and leaves all other source text unchanged before parsing. Its table scan accepts optional outer pipes, stops at block starts and fresh list items, and checks semantic container blanks for `prettier-ignore` without loosening the direct helper.
+- Root printing repairs a surplus delimiter suffix only when every real row matches the header and closed inline-code pipes exactly explain the extra columns.
 - Root printer rewriting only changes requested ranges during range formatting.
 - Doc conversion with `printDocToString` does not place embedded newlines inside Prettier doc strings.
 - Markdown, MDX, and remark parsers all keep the same table output rules.
@@ -93,6 +95,8 @@ Files:
 Checklist:
 
 - Pipe-heavy rows and large files without pipes stay linear enough for normal editor use.
+- Wide padded cells are sliced from the source at delimiters instead of rebuilt one character at a time.
+- Large plugin inputs with inline-code pipes exercise the parser prepass under the stress timeout and retained-heap checks.
 - Adversarial rows with many pipes, escapes, or unmatched code spans preserve input instead of guessing.
 - Direct helper calls do not rewrite bare GFM tables before Prettier has converted them to pipe-wrapped rows.
 - Error paths fail loudly with clear messages when invalid range offsets are passed.

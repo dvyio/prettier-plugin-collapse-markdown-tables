@@ -178,7 +178,9 @@ After:
 
 ### `markdownTableStyle: "prettier"`
 
-This turns the plugin's table rewrite off and keeps Prettier's built-in Markdown output.
+This turns the plugin's post-print table rewrite off and keeps Prettier's built-in alignment.
+
+The parser still adds missing backslashes to inline-code pipes when that is needed to keep the right number of table cells.
 
 Before:
 
@@ -285,13 +287,17 @@ The plugin prints the full Markdown document before it collapses tables, so very
 It skips:
 
 - bare GFM tables without outer pipes when you call the helper directly
-- rows with mismatched header and delimiter cell counts
+- rows with mismatched header and delimiter cell counts, unless closed inline-code pipes prove that an earlier Prettier pass widened only the delimiter
 - delimiter rows with empty or malformed cells
 - table rows with inconsistent list or blockquote prefixes
 - malformed rows with unbalanced code spans
 - ambiguous rows with too many unescaped pipes
 
-Escaped pipes and pipes inside valid inline code spans are kept inside the cell.
+Escaped pipes and pipes inside valid inline code spans are kept inside the cell. The plugin adds a missing backslash to inline-code pipes before Prettier parses the table.
+
+If Prettier already widened a table in an earlier run, the plugin can also restore the intended delimiter count. It does this only when every real row still matches the header and the inline-code pipes account for every extra delimiter column.
+
+This works whether each row has both, either, or neither outer pipe. The direct helper keeps the original inline-code spelling.
 
 Bare GFM tables behave differently in the plugin and the helper. `prettier.format` runs Prettier first, so a bare table such as `Name | Role` is printed as a pipe-wrapped table before this plugin collapses it. A direct `normalizeMarkdownTables` call does not run Prettier first, so the same bare table is returned unchanged.
 

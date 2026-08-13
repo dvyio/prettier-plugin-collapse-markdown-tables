@@ -20,10 +20,16 @@ Built with TypeScript, Prettier, Vitest, esbuild, ESLint, Knip, and Husky. Check
 
 - Default table output is `spaced`. `compact` removes cell padding. `prettier` returns Prettier's aligned output unchanged.
 - Preserve alignment markers, empty cells, missing trailing cells, list and blockquote prefixes, and existing line ending style.
+- Parser preprocessing may escape pipes inside closed code spans in safe table rows. It accepts optional outer pipes, but the direct helper's scan stays strict.
+- Track each inserted backslash in original UTF-16 coordinates. Preserve all other source text. Leave collapsing and ambiguous-row repair until after Prettier parses the document.
+- Repair a Prettier-widened delimiter only when every real row still matches the header and closed code-span pipes exactly explain the surplus columns.
+- Scan wide table cells by source offsets and slice at delimiters. Do not rebuild cells one character at a time.
+- Parser preprocessing must stop at Markdown block starts and fresh sibling list markers. Check blank lines after stripping their container markers before applying `prettier-ignore`.
 - Row repair needs evidence. Merge split fragments only for open code spans or odd escaped pipes.
 - Rows with extra real cells must stay unchanged. Do not silently change the cell count.
 - Protected regions must stay untouched: fenced code, indented code, front matter, HTML comments, raw HTML blocks, Prettier ignore ranges, MDX JSX, and MDX ESM.
 - Range formatting must only rewrite tables that intersect the requested range. Keep `rangeStart`, `rangeEnd`, and `cursorOffset` attached to the same logical text after table padding changes.
+- Use line-local offset mapping only for transforms that preserve line boundaries. Arbitrary Prettier output needs the global text mapper even when its line count happens to match.
 
 ## Source Conventions
 

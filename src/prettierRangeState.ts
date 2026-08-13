@@ -7,6 +7,8 @@ import type { ParserOptions } from 'prettier';
 import type { MarkdownOffset, NormalizedOffset } from './normalizer/types.js';
 
 import {
+  getLineStartOffsets,
+  splitMarkdownLines,
   toMarkdownOffset,
   toNormalizedOffset,
 } from './normalizer/lineUtils.js';
@@ -40,6 +42,13 @@ type MappedPrettierRangeState = {
   readonly cursorOffset?: NormalizedOffset | undefined;
   readonly rangeEnd: NormalizedOffset;
   readonly rangeStart: NormalizedOffset;
+};
+
+type LinePreservingOffsetMappingContext = {
+  readonly normalizedLines: ReadonlyArray<string>;
+  readonly normalizedLineStartOffsets: ReadonlyArray<MarkdownOffset>;
+  readonly originalLines: ReadonlyArray<string>;
+  readonly originalLineStartOffsets: ReadonlyArray<MarkdownOffset>;
 };
 
 /**
@@ -90,7 +99,7 @@ export function forgetPreprocessedMarkdown(options: ParserOptions): void {
 /**
  * Rewrites Prettier's range and cursor offsets after parser preprocessing changes Markdown text.
  */
-export function remapPrettierRangeStateAfterPreprocess(
+export function remapPrettierRangeStateAfterLinePreservingPreprocess(
   options: ParserOptions,
   original: string,
   normalized: string,
@@ -110,10 +119,74 @@ export function remapPrettierRangeStateAfterPreprocess(
 }
 
 /**
+ * Rewrites Prettier's range and cursor offsets after known backslash insertions.
+ */
+export function remapPrettierRangeStateAfterInsertions(
+  options: ParserOptions,
+  original: string,
+  insertedBackslashOffsets: ReadonlyArray<MarkdownOffset>,
+): void {
+  if (insertedBackslashOffsets.length === 0) {
+    return;
+  }
+
+  const rangeState = readPrettierRangeState(options);
+  let mappedRangeEnd = toNormalizedOffset(
+    original.length + insertedBackslashOffsets.length,
+  );
+
+  if (rangeState.rangeEnd !== undefined && !rangeState.isRangeEndInfinity) {
+    mappedRangeEnd = mapOffsetAfterInsertions(
+      original,
+      insertedBackslashOffsets,
+      rangeState.rangeEnd,
+    );
+  }
+
+  const mappedRangeState: {
+    cursorOffset?: NormalizedOffset | undefined;
+    rangeEnd: NormalizedOffset;
+    rangeStart: NormalizedOffset;
+  } = {
+    rangeEnd: mappedRangeEnd,
+    rangeStart: mapOffsetAfterInsertions(
+      original,
+      insertedBackslashOffsets,
+      rangeState.rangeStart ?? toMarkdownOffset(0),
+    ),
+  };
+
+  if (rangeState.cursorOffset !== undefined) {
+    mappedRangeState.cursorOffset = mapOffsetAfterInsertions(
+      original,
+      insertedBackslashOffsets,
+      rangeState.cursorOffset,
+    );
+  }
+
+  writePrettierRangeState(options, mappedRangeState);
+}
+
+function mapOffsetAfterInsertions(
+  original: string,
+  insertionOffsets: ReadonlyArray<MarkdownOffset>,
+  offset: MarkdownOffset,
+): NormalizedOffset {
+  assertValidOriginalOffset(original, offset);
+
+  const logicalOffset = normalizeCrLfSeparatorOffset(original, offset);
+
+  return toNormalizedOffset(
+    logicalOffset +
+      countInsertionOffsetsBefore(insertionOffsets, logicalOffset),
+  );
+}
+
+/**
  * Maps Prettier range offsets from one Markdown string to another.
  */
 export function mapPrettierRangeStateToMarkdown(
-  options: ParserOptions,
+  options: object,
   original: string,
   normalized: string,
 ): MappedPrettierRangeState {
@@ -125,11 +198,13 @@ export function mapPrettierRangeStateToMarkdown(
       normalized,
       rangeState.rangeEnd,
       rangeState.isRangeEndInfinity,
+      undefined,
     ),
     rangeStart: mapRangeStartToNormalized(
       original,
       normalized,
       rangeState.rangeStart,
+      undefined,
     ),
   };
 }
@@ -151,7 +226,7 @@ function readOriginalText(options: ParserOptions): string | undefined {
   return typeof originalText === 'string' ? originalText : undefined;
 }
 
-function readPrettierRangeState(options: ParserOptions): PrettierRangeState {
+function readPrettierRangeState(options: object): PrettierRangeState {
   return {
     cursorOffset: readOptionalMarkdownOffset(options, 'cursorOffset'),
     isRangeEndInfinity:
@@ -179,6 +254,10 @@ function mapPrettierRangeState(
   original: string,
   normalized: string,
 ): MappedPrettierRangeState {
+  const context = createLinePreservingOffsetMappingContext(
+    original,
+    normalized,
+  );
   const mappedRangeState: {
     cursorOffset?: NormalizedOffset | undefined;
     rangeEnd: NormalizedOffset;
@@ -189,11 +268,13 @@ function mapPrettierRangeState(
       normalized,
       rangeState.rangeEnd,
       rangeState.isRangeEndInfinity,
+      context,
     ),
     rangeStart: mapRangeStartToNormalized(
       original,
       normalized,
       rangeState.rangeStart,
+      context,
     ),
   };
 
@@ -202,6 +283,7 @@ function mapPrettierRangeState(
       original,
       normalized,
       rangeState.cursorOffset,
+      context,
     );
   }
 
@@ -209,7 +291,7 @@ function mapPrettierRangeState(
 }
 
 function readOptionalMarkdownOffset(
-  options: ParserOptions,
+  options: object,
   key: 'cursorOffset' | 'rangeEnd' | 'rangeStart',
 ): MarkdownOffset | undefined {
   const value = readNumberOption(options, key);
@@ -222,7 +304,7 @@ function readOptionalMarkdownOffset(
 }
 
 function readNumberOption(
-  options: ParserOptions,
+  options: object,
   key: PrettierRangeOptionKey,
 ): number | undefined {
   const value = readOptionValue(options, key);
@@ -241,7 +323,7 @@ function readNumberOption(
 }
 
 function readOptionValue(
-  options: ParserOptions,
+  options: object,
   key: PrettierRangeOptionKey,
 ): unknown {
   return readOwnDataOption(options, key);
@@ -251,11 +333,13 @@ function mapRangeStartToNormalized(
   original: string,
   normalized: string,
   rangeStart: MarkdownOffset | undefined,
+  context: LinePreservingOffsetMappingContext | undefined,
 ): NormalizedOffset {
   return mapOriginalOffsetToNormalized(
     original,
     normalized,
     rangeStart ?? toMarkdownOffset(0),
+    context,
   );
 }
 
@@ -264,26 +348,22 @@ function mapRangeEndToNormalized(
   normalized: string,
   rangeEnd: MarkdownOffset | undefined,
   isRangeEndInfinity: boolean,
+  context: LinePreservingOffsetMappingContext | undefined,
 ): NormalizedOffset {
   if (rangeEnd === undefined || isRangeEndInfinity) {
     return toNormalizedOffset(normalized.length);
   }
 
-  return mapOriginalOffsetToNormalized(original, normalized, rangeEnd);
+  return mapOriginalOffsetToNormalized(original, normalized, rangeEnd, context);
 }
 
 function mapOriginalOffsetToNormalized(
   original: string,
   normalized: string,
   offset: MarkdownOffset,
+  context: LinePreservingOffsetMappingContext | undefined,
 ): NormalizedOffset {
-  if (!Number.isInteger(offset) || offset < 0 || offset > original.length) {
-    throw new Error(
-      `Invalid offset "${String(offset)}" — expected an integer between 0 and ${
-        original.length
-      }.`,
-    );
-  }
+  assertValidOriginalOffset(original, offset);
 
   const logicalOffset = normalizeCrLfSeparatorOffset(original, offset);
 
@@ -310,6 +390,12 @@ function mapOriginalOffsetToNormalized(
     );
   }
 
+  const lineMappedOffset = mapOffsetWithinSameLine(logicalOffset, context);
+
+  if (lineMappedOffset !== undefined) {
+    return toNormalizedOffset(lineMappedOffset);
+  }
+
   return toNormalizedOffset(
     prefixLength +
       mapChangedColumnToNormalized(
@@ -318,6 +404,105 @@ function mapOriginalOffsetToNormalized(
         logicalOffset - prefixLength,
       ),
   );
+}
+
+function assertValidOriginalOffset(
+  original: string,
+  offset: MarkdownOffset,
+): void {
+  if (!Number.isInteger(offset) || offset < 0 || offset > original.length) {
+    throw new Error(
+      `Invalid offset "${String(offset)}" — expected an integer between 0 and ${
+        original.length
+      }.`,
+    );
+  }
+}
+
+function createLinePreservingOffsetMappingContext(
+  original: string,
+  normalized: string,
+): LinePreservingOffsetMappingContext | undefined {
+  const originalMarkdownLines = splitMarkdownLines(original);
+  const normalizedMarkdownLines = splitMarkdownLines(normalized);
+
+  if (
+    originalMarkdownLines.lines.length !== normalizedMarkdownLines.lines.length
+  ) {
+    return undefined;
+  }
+
+  return {
+    normalizedLines: normalizedMarkdownLines.lines,
+    normalizedLineStartOffsets: getLineStartOffsets(
+      normalizedMarkdownLines.lines,
+      normalizedMarkdownLines.lineSeparators,
+    ),
+    originalLines: originalMarkdownLines.lines,
+    originalLineStartOffsets: getLineStartOffsets(
+      originalMarkdownLines.lines,
+      originalMarkdownLines.lineSeparators,
+    ),
+  };
+}
+
+function mapOffsetWithinSameLine(
+  offset: number,
+  context: LinePreservingOffsetMappingContext | undefined,
+): number | undefined {
+  if (context === undefined) {
+    return undefined;
+  }
+
+  const lineIndex = findLineIndexAtOffset(
+    context.originalLineStartOffsets,
+    offset,
+  );
+  const originalLine = context.originalLines[lineIndex];
+  const normalizedLine = context.normalizedLines[lineIndex];
+  const originalLineStart = context.originalLineStartOffsets[lineIndex];
+  const normalizedLineStart = context.normalizedLineStartOffsets[lineIndex];
+
+  if (
+    originalLine === undefined ||
+    normalizedLine === undefined ||
+    originalLineStart === undefined ||
+    normalizedLineStart === undefined
+  ) {
+    return undefined;
+  }
+
+  const originalColumn = Math.min(
+    offset - originalLineStart,
+    originalLine.length,
+  );
+
+  return (
+    normalizedLineStart +
+    mapChangedColumnToNormalized(originalLine, normalizedLine, originalColumn)
+  );
+}
+
+function findLineIndexAtOffset(
+  lineStartOffsets: ReadonlyArray<MarkdownOffset>,
+  offset: number,
+): number {
+  let low = 0;
+  let high = lineStartOffsets.length - 1;
+
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const lineStart = lineStartOffsets[middle];
+
+    if (lineStart !== undefined && lineStart <= offset) {
+      low = middle + 1;
+      continue;
+    }
+
+    high = middle - 1;
+  }
+
+  return Math.max(0, high);
 }
 
 function normalizeCrLfSeparatorOffset(
@@ -329,6 +514,28 @@ function normalizeCrLfSeparatorOffset(
   }
 
   return offset;
+}
+
+function countInsertionOffsetsBefore(
+  insertionOffsets: ReadonlyArray<MarkdownOffset>,
+  offset: MarkdownOffset,
+): number {
+  let low = 0;
+  let high = insertionOffsets.length;
+
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    const insertionOffset = insertionOffsets[middle];
+
+    if (insertionOffset !== undefined && insertionOffset < offset) {
+      low = middle + 1;
+      continue;
+    }
+
+    high = middle;
+  }
+
+  return low;
 }
 
 function getSharedPrefixLength(left: string, right: string): number {

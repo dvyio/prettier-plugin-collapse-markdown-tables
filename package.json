@@ -1,6 +1,6 @@
 {
   "name": "@dvyio/prettier-plugin-collapse-markdown-tables",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Prettier plugin that collapses Markdown table padding.",
   "keywords": [
     "formatting",

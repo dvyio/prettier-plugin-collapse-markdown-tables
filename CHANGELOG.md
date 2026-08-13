@@ -16,6 +16,16 @@ The supported Prettier line is Prettier `3.x`. The test suite checks the packed 
 
 Parser-behaviour changes need a changelog entry when they affect which table-shaped text is rewritten, which regions are protected, or how range and cursor offsets map after formatting. If a change can alter a user's Markdown output, it belongs here.
 
+## 0.2.1 - 2026-08-13
+
+### Fixed
+
+- Kept pipes inside closed inline-code spans in the intended table cell across Markdown, MDX, and remark tables, including tables with optional outer pipes.
+- Restored delimiters widened by an earlier Prettier run when inline-code pipes account for every extra column.
+- Kept range selections and cursor positions attached to the correct text after table preprocessing and normal Prettier wrapping.
+- Stopped table preprocessing at headings and fresh list items, and kept ignored blockquote tables untouched.
+- Reduced memory use when scanning very wide table cells by slicing them from the source instead of rebuilding them one character at a time.
+
 ## 0.2.0 - 2026-05-08
 
 ### Added
