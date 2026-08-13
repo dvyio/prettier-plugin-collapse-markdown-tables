@@ -47,6 +47,7 @@ Built with TypeScript, Prettier, Vitest, esbuild, ESLint, Knip, and Husky. Check
 - Prefer behavior tests over implementation tests. If the same input and output would still pass after a rewrite, the test is probably at the right level.
 - Use direct helper tests for row parsing, protected regions, malformed rows, code spans, escaped pipes, CRLF/CR-only input, range limits, and performance limits.
 - Use Prettier API and CLI tests for plugin loading, parser wrapping, Markdown/MDX/remark behavior, style options, range formatting, cursor offsets, fixtures, snapshots, and package compatibility.
+- Compatibility tests must not pin whitespace or adjacent mdast text-node splits that belong to Prettier. Compute built-in output with the installed version, then assert this plugin's style, protected text, table meaning, and idempotence.
 - Use the audit checklist before changing parser wrapping, range handling, protected-region scanning, table repair, rendering, packaging, or fixture coverage.
 - Keep stress-only performance assertions behind `NORMALIZE_MARKDOWN_TABLES_STRESS=1`. Normal checks should catch hangs without failing on benchmark noise.
 
@@ -62,6 +63,9 @@ Built with TypeScript, Prettier, Vitest, esbuild, ESLint, Knip, and Husky. Check
 
 - Before code changes, read the target file and the closest test file. For exported behavior, also search for callers and CLI/API coverage.
 - For parser wrapping, range handling, protected regions, table repair, rendering, or package shape, read the matching section in `docs/audit-checklist.md` before editing.
+- Type printer callbacks from the installed Prettier `Printer` signature. Prettier 3 minor releases may widen the callback without changing runtime behavior.
+- In the latest-Prettier CI lane, install Prettier in an empty temporary prefix and replace only `node_modules/prettier`. Do not run `npm install` over the lockfile tree.
+- The lockfile Prettier owns source formatting. The latest-Prettier lane uses `check:prettier-latest`, which checks compatibility without applying a different minor release's source style.
 - Run the narrow relevant test early, then run the full gate before done.
 - Final TypeScript gate: `npm run lint:fix && npm run format:fix && npm run check`.
 - For Markdown table behavior changes, run `npm run format:dogfood:fix` before the final gate.

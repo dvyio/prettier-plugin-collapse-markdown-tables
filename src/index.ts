@@ -70,6 +70,7 @@ type MarkdownNode = {
 };
 
 type MarkdownParserName = 'markdown' | 'mdx' | 'remark';
+type MarkdownPrint = Parameters<Printer<MarkdownNode>['print']>[2];
 
 const { printDocToString } = docPrinter;
 const { hardline, join } = builders;
@@ -129,7 +130,7 @@ const printers: Record<'mdast', Printer<MarkdownNode>> = {
     print(
       path: AstPath<MarkdownNode>,
       options: ParserOptions<MarkdownNode>,
-      print: (path: AstPath<MarkdownNode>) => Doc,
+      print: MarkdownPrint,
       args?: unknown,
     ): Doc {
       const printed = originalPrinter.print(path, options, print, args);
@@ -154,8 +155,7 @@ const printers: Record<'mdast', Printer<MarkdownNode>> = {
         !hasMarkdownTableNode(path.node) &&
         markdownOptions.markdownTableFencedCode === 'protected'
       ) {
-        forgetPreprocessedMarkdown(options);
-        return printed;
+        return normalizePrintedMarkdownThroughAdapter(printed, options, true);
       }
 
       return normalizePrintedMarkdownThroughAdapter(printed, options);
@@ -166,6 +166,7 @@ const printers: Record<'mdast', Printer<MarkdownNode>> = {
 function normalizePrintedMarkdownThroughAdapter(
   printed: Doc,
   options: ParserOptions<MarkdownNode>,
+  requireWidenedDelimiterRepair = false,
 ): Doc {
   const pluginOptions = readMarkdownPluginOptions(options);
 
@@ -190,6 +191,11 @@ function normalizePrintedMarkdownThroughAdapter(
     const repaired = shouldRepairPrintedMarkdown(normalizeOptions)
       ? repairPrettierWidenedTableDelimiters(formatted, normalizeOptions)
       : formatted;
+
+    if (requireWidenedDelimiterRepair && repaired === formatted) {
+      return printed;
+    }
+
     const escaped =
       repaired === formatted
         ? formatted

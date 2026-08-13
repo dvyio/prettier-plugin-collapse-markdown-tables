@@ -590,10 +590,12 @@ describe('prettier plugin', () => {
 
     await expect(
       prettier.format(leadingOnly, {
+        markdownTableStyle: 'prettier',
         parser: 'markdown',
         plugins: [plugin],
       }),
     ).resolves.toBe(prettierOutput);
+    expect(prettierOutput).not.toContain('`a\\|b`');
   });
 
   test('given mixed inline-code pipes, when formatting with each Markdown parser and style, then keeps three columns and the original code text', async () => {
@@ -668,6 +670,7 @@ describe('prettier plugin', () => {
       plugins: [prettierMarkdownPlugin],
     });
     const pluginOutput = await prettier.format(source, {
+      markdownTableStyle: 'prettier',
       parser: 'markdown',
       plugins: [plugin],
     });
@@ -1466,27 +1469,26 @@ describe('prettier plugin', () => {
       '',
     ].join('\n');
 
-    await expect(
-      prettier.format(markdownWithTextarea, {
-        parser: 'markdown',
-        plugins: [plugin],
-      }),
-    ).resolves.toBe(
-      [
-        '<textarea>',
-        '',
-        '| Name  | Role    |',
-        '| ----- | ------- |',
-        '| Davey | Builder |',
-        '',
-        '</textarea>',
-        '',
-        '| Name | Role |',
-        '| --- | --- |',
-        '| Davey | Builder |',
-        '',
-      ].join('\n'),
+    const prettierOutput = await prettier.format(markdownWithTextarea, {
+      parser: 'markdown',
+      plugins: [prettierMarkdownPlugin],
+    });
+    const pluginOutput = await prettier.format(markdownWithTextarea, {
+      parser: 'markdown',
+      plugins: [plugin],
+    });
+    const pluginOutputAgain = await prettier.format(pluginOutput, {
+      parser: 'markdown',
+      plugins: [plugin],
+    });
+
+    expect(readRawHtmlElement(pluginOutput, 'textarea')).toBe(
+      readRawHtmlElement(prettierOutput, 'textarea'),
     );
+    expect(readTextAfterRawHtmlElement(pluginOutput, 'textarea')).toContain(
+      ['| Name | Role |', '| --- | --- |', '| Davey | Builder |'].join('\n'),
+    );
+    expect(pluginOutputAgain).toBe(pluginOutput);
   });
 
   test('given raw HTML closing tags use casing or whitespace, when formatting Markdown, then following tables collapse', async () => {
@@ -2630,6 +2632,39 @@ describe('prettier plugin', () => {
     );
 
     expect(result.formatted).toBe(unnormalizedMarkdown);
+  });
+
+  test('given debug printing has no table node but the delimiter was widened by inline-code pipes, when printing, then it restores the intended table', async () => {
+    const widenedMarkdown = [
+      '| ID | Notes | Fixed |',
+      '| --- | --- | --- | --- | --- |',
+      '| BIOQ-1247 | Retired `G-15 | abc`, then `x | y` | [ ] |',
+      '',
+    ].join('\n');
+    const expected = [
+      '| ID | Notes | Fixed |',
+      '| --- | --- | --- |',
+      '| BIOQ-1247 | Retired `G-15 \\| abc`, then `x \\| y` | [ ] |',
+      '',
+    ].join('\n');
+    const printOptions = {
+      parser: 'markdown',
+      plugins: [plugin],
+    } satisfies prettier.Options;
+    const printed = printRootMarkdownDocWithoutOriginalText(
+      widenedMarkdown,
+      printOptions,
+      {
+        children: [{ type: 'paragraph' }],
+        type: 'root',
+      },
+    );
+    const result = await getPrettierDebugApi().printDocToString(
+      printed,
+      printOptions,
+    );
+
+    expect(result.formatted).toBe(expected);
   });
 
   test('given debug range printing without originalText, when printing, then it explains that range mapping needs source text', () => {
@@ -4113,8 +4148,12 @@ describe('prettier plugin', () => {
 
   for (const fixture of FORMAT_FIXTURES) {
     for (const style of FIXTURE_STYLES) {
-      test(`given ${fixture.fileName} and ${style} style, when formatting, then output matches the fixture snapshot and stays stable`, async () => {
+      test(`given ${fixture.fileName} and ${style} style, when formatting, then output stays stable`, async () => {
         const source = readFixture(fixture.fileName);
+        const prettierOutput = await prettier.format(source, {
+          parser: fixture.parser,
+          plugins: [prettierMarkdownPlugin],
+        });
         const formatted = await formatWithPlugin(source, fixture.parser, style);
         const formattedAgain = await formatWithPlugin(
           formatted,
@@ -4122,8 +4161,14 @@ describe('prettier plugin', () => {
           style,
         );
 
+        expect(formatted).toBe(
+          normalizeMarkdownTables(prettierOutput, {
+            enableMdxEsm: fixture.parser === 'mdx',
+            enableMdxJsx: fixture.parser === 'mdx',
+            markdownTableStyle: style,
+          }),
+        );
         expect(formattedAgain).toBe(formatted);
-        expect(formatted).toMatchSnapshot();
       });
     }
   }
@@ -4190,11 +4235,7 @@ describe('prettier plugin', () => {
                 url: 'https://example.com',
               },
             ],
-            [
-              { type: 'text', value: 'a' },
-              { type: 'text', value: '|' },
-              { type: 'text', value: 'b' },
-            ],
+            [{ type: 'text', value: 'a|b' }],
           ],
         ],
       },
@@ -4420,6 +4461,7 @@ describe('prettier plugin', () => {
   test('given ambiguous repair-shaped rows, when formatting, then they match built-in Prettier semantics', async () => {
     const ambiguousCases = [
       {
+        expectedBodyFragments: ['Davey', 'Builder', 'Writer'],
         label: 'overwide real cell',
         source: [
           '| Name | Note |',
@@ -4428,6 +4470,7 @@ describe('prettier plugin', () => {
         ].join('\n'),
       },
       {
+        expectedBodyFragments: ['Davey', 'Builder\\', 'Writer'],
         label: 'aligned trailing backslash',
         source: [
           '| Name | Note |',
@@ -4436,6 +4479,7 @@ describe('prettier plugin', () => {
         ].join('\n'),
       },
       {
+        expectedBodyFragments: ['Davey', '`Builder', 'Writer'],
         label: 'unclosed code span pipe',
         source: [
           '| Name | Note |',
@@ -4455,8 +4499,16 @@ describe('prettier plugin', () => {
         'markdown',
         'spaced',
       );
+      const pluginOutputAgain = await formatWithPlugin(
+        pluginOutput,
+        'markdown',
+        'spaced',
+      );
 
-      expect(pluginOutput, ambiguousCase.label).toBe(prettierOutput);
+      for (const fragment of ambiguousCase.expectedBodyFragments) {
+        expect(pluginOutput, ambiguousCase.label).toContain(fragment);
+      }
+      expect(pluginOutputAgain, ambiguousCase.label).toBe(pluginOutput);
       expect(
         await parseTableSemantics(pluginOutput, 'markdown'),
         ambiguousCase.label,
@@ -4576,24 +4628,28 @@ describe('prettier plugin', () => {
     expect(pluginOutput).toContain('| Davey 399 | Builder |');
   });
 
-  test('given a large table has inline-code pipes, when formatting with the plugin, then the pre-parser stays fast and keeps three columns', async () => {
-    const rows = Array.from(
-      { length: 3_300 },
-      (_, index) =>
-        `| BIOQ-${String(index)} | Retired \`G-15|${String(index)}\`, kept \`G-16\\|${String(index)}\`, and moved \`G-23|${String(index)}\` | [ ] |`,
-    );
-    const source = [
-      '| ID | Notes | Fixed |',
-      '| --- | --- | --- |',
-      ...rows,
-      '',
-    ].join('\n');
-    const pluginOutput = await expectFastPluginFormat(source, 'markdown');
+  test(
+    'given a large table has inline-code pipes, when formatting with the plugin, then the pre-parser stays fast and keeps three columns',
+    async () => {
+      const rows = Array.from(
+        { length: 3_300 },
+        (_, index) =>
+          `| BIOQ-${String(index)} | Retired \`G-15|${String(index)}\`, kept \`G-16\\|${String(index)}\`, and moved \`G-23|${String(index)}\` | [ ] |`,
+      );
+      const source = [
+        '| ID | Notes | Fixed |',
+        '| --- | --- | --- |',
+        ...rows,
+        '',
+      ].join('\n');
+      const pluginOutput = await expectFastPluginFormat(source, 'markdown');
 
-    expect(pluginOutput).toContain(
-      '| BIOQ-3299 | Retired `G-15\\|3299`, kept `G-16\\|3299`, and moved `G-23\\|3299` | [ ] |',
-    );
-  });
+      expect(pluginOutput).toContain(
+        '| BIOQ-3299 | Retired `G-15\\|3299`, kept `G-16\\|3299`, and moved `G-23\\|3299` | [ ] |',
+      );
+    },
+    LARGE_PLUGIN_FORMAT_TIMEOUT_MS + PERFORMANCE_TEST_TIMEOUT_BUFFER_MS,
+  );
 
   test('given a wide table has a Prettier-widened delimiter, when formatting with the plugin, then recovery stays fast and collapses the padding', async () => {
     const padding = ' '.repeat(4_000);
@@ -5680,7 +5736,35 @@ function readTableCellSemantics(
     return [];
   }
 
-  return getNodeChildren(node).map(readInlineNodeSemantics);
+  return readInlineNodeSemanticsList(getNodeChildren(node));
+}
+
+function readInlineNodeSemanticsList(
+  nodes: ReadonlyArray<unknown>,
+): ReadonlyArray<InlineNodeSemantics> {
+  const semantics: Array<InlineNodeSemantics> = [];
+
+  for (const node of nodes) {
+    const current = readInlineNodeSemantics(node);
+    const previous = semantics.at(-1);
+
+    if (
+      current.type === 'text' &&
+      previous?.type === 'text' &&
+      current.value !== undefined &&
+      previous.value !== undefined
+    ) {
+      semantics[semantics.length - 1] = {
+        type: 'text',
+        value: `${previous.value}${current.value}`,
+      };
+      continue;
+    }
+
+    semantics.push(current);
+  }
+
+  return semantics;
 }
 
 function readInlineNodeSemantics(node: unknown): InlineNodeSemantics {
@@ -5713,7 +5797,7 @@ function readInlineNodeSemantics(node: unknown): InlineNodeSemantics {
   const children = getNodeChildren(node);
 
   if (children.length > 0) {
-    semantics.children = children.map(readInlineNodeSemantics);
+    semantics.children = readInlineNodeSemanticsList(children);
   }
 
   return semantics;
@@ -5725,6 +5809,36 @@ function readNodeType(node: Record<string, unknown>): string {
   }
 
   return 'unknown';
+}
+
+function readRawHtmlElement(markdown: string, elementName: string): string {
+  const start = markdown.indexOf(`<${elementName}>`);
+  const closingTag = `</${elementName}>`;
+  const closingTagStart = markdown.indexOf(closingTag, start);
+
+  if (start < 0 || closingTagStart < 0) {
+    throw new Error(
+      `Could not find complete <${elementName}> element in formatted Markdown.`,
+    );
+  }
+
+  return markdown.slice(start, closingTagStart + closingTag.length);
+}
+
+function readTextAfterRawHtmlElement(
+  markdown: string,
+  elementName: string,
+): string {
+  const closingTag = `</${elementName}>`;
+  const closingTagStart = markdown.indexOf(closingTag);
+
+  if (closingTagStart < 0) {
+    throw new Error(
+      `Could not find closing ${closingTag} tag in formatted Markdown.`,
+    );
+  }
+
+  return markdown.slice(closingTagStart + closingTag.length);
 }
 
 function createSeededRandom(seed: number): SeededRandom {

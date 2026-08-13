@@ -50,6 +50,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "check": "npm run build && npm run typecheck && npm run lint && npm run format && npm run knip && npm run test:coverage:built && npm run format:dogfood:check:built",
+    "check:prettier-latest": "npm run build && npm run typecheck && npm run lint && npm run knip && npm run test:coverage:built && npm run format:dogfood:check:built",
     "check:release": "npm run check && npm run test:stress && npm run test:mutation && npm run pack:check",
     "format": "prettier --check . --log-level warn",
     "format:dogfood:check": "npm run build && npm run format:dogfood:check:built",

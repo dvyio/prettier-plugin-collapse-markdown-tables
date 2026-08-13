@@ -41,15 +41,28 @@ jobs:
 
       - name: Install latest Prettier 3.x
         if: matrix.prettier == 'latest-3'
-        run: npm install --no-save --package-lock=false --ignore-scripts prettier@^3
+        run: |
+          npm install \
+            --prefix "$RUNNER_TEMP/prettier-latest" \
+            --no-save \
+            --package-lock=false \
+            --ignore-scripts \
+            prettier@^3
+          mv node_modules/prettier "$RUNNER_TEMP/prettier-lockfile"
+          cp -R "$RUNNER_TEMP/prettier-latest/node_modules/prettier" node_modules/prettier
+          node --input-type=module -e "import prettier from 'prettier'; console.log('Testing Prettier ' + prettier.version + '.')"
 
       - name: Run release checks
         if: matrix.node == '20.x' && matrix.prettier == 'lockfile'
         run: npm run check:release
 
       - name: Run checks
-        if: matrix.node != '20.x' || matrix.prettier != 'lockfile'
+        if: matrix.node != '20.x' && matrix.prettier == 'lockfile'
         run: npm run check
+
+      - name: Run latest Prettier checks
+        if: matrix.prettier == 'latest-3'
+        run: npm run check:prettier-latest
 
       - name: Check package dry run
         if: matrix.node != '20.x' || matrix.prettier != 'lockfile'

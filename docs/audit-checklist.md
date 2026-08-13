@@ -81,7 +81,7 @@ Checklist:
 - Helper tests cover direct `normalizeMarkdownTables` behavior, row parsing, protected regions, malformed rows, code spans, escaped pipes, repair, compact style, CRLF, and range limits.
 - Prettier API tests cover `format`, `formatWithCursor`, Markdown, MDX, remark, default style, explicit style values, `prettier` style, range formatting, cursor offsets, fixtures, and snapshots.
 - CLI tests cover `--check`, `--write`, `--debug-check`, plugin load errors, ignored tables, and packed package compatibility.
-- Fixture snapshots prove formatted output stays stable after a second formatting pass.
+- Fixture integration tests derive upstream output from the installed Prettier version, apply this plugin's documented style, and prove a second formatting pass is stable.
 - Semantic table tests compare plugin output with built-in Prettier for cell content, not just string shape.
 
 ## Performance And Safety
