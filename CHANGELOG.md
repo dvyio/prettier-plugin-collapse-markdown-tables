@@ -16,6 +16,12 @@ The supported Prettier line is Prettier `3.x`. The test suite checks the packed 
 
 Parser-behaviour changes need a changelog entry when they affect which table-shaped text is rewritten, which regions are protected, or how range and cursor offsets map after formatting. If a change can alter a user's Markdown output, it belongs here.
 
+## Unreleased
+
+### Fixed
+
+- Kept trailing spaces, including two-space hard breaks, in paragraphs, raw HTML, and `prettier-ignore` text when another table in the file collapses.
+
 ## 0.2.1 - 2026-08-13
 
 ### Fixed

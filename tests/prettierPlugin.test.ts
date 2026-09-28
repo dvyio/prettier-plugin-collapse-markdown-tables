@@ -4150,6 +4150,113 @@ describe('prettier plugin', () => {
     );
   });
 
+  test('given a paragraph ends with a two-space hard break, when another table collapses, then keeps the hard break', async () => {
+    for (const parser of ['markdown', 'mdx', 'remark'] as const) {
+      for (const lineEnding of [
+        { endOfLine: 'lf', separator: '\n' },
+        { endOfLine: 'crlf', separator: '\r\n' },
+      ] as const) {
+        const source = [
+          'First line.  ',
+          'Second line.',
+          '',
+          ...markdown.trimEnd().split('\n'),
+          '',
+        ].join(lineEnding.separator);
+        const options = {
+          endOfLine: lineEnding.endOfLine,
+          parser,
+        };
+        const builtin = await prettier.format(source, options);
+        const pluginOptions = { ...options, plugins: [plugin] };
+        const formatted = await prettier.format(source, pluginOptions);
+        const context = `${parser}, ${lineEnding.endOfLine}`;
+
+        expect(formatted, context).toBe(normalizeMarkdownTables(builtin));
+        expect(formatted, context).not.toBe(builtin);
+        await expect(
+          prettier.format(formatted, pluginOptions),
+          context,
+        ).resolves.toBe(formatted);
+      }
+    }
+  });
+
+  for (const ignoredBlock of [
+    {
+      end: ['', '<!-- prettier-ignore-end -->'],
+      label: 'an ignore range',
+      start: ['<!-- prettier-ignore-start -->', ''],
+    },
+    {
+      end: [],
+      label: 'an ignored code block',
+      start: ['<!-- prettier-ignore -->'],
+    },
+  ]) {
+    test(`given ${ignoredBlock.label} contains trailing whitespace, when another table collapses, then preserves the ignored text and cursor`, async () => {
+      for (const parser of ['markdown', 'mdx', 'remark'] as const) {
+        for (const markdownTableStyle of ['spaced', 'compact'] as const) {
+          for (const lineEnding of [
+            { endOfLine: 'lf', separator: '\n' },
+            { endOfLine: 'crlf', separator: '\r\n' },
+          ] as const) {
+            const protectedText = [
+              ...ignoredBlock.start,
+              '```md',
+              'Keep these spaces.  ',
+              'Keep this tab.\t',
+              '   ',
+              '\t',
+              '| uneven |table |  ',
+              '| --- | --- |',
+              '| a | b |',
+              '```',
+              ...ignoredBlock.end,
+            ].join(lineEnding.separator);
+            const source = [
+              ...markdown.trimEnd().split('\n'),
+              '',
+              protectedText,
+              '',
+            ].join(lineEnding.separator);
+            const options = {
+              endOfLine: lineEnding.endOfLine,
+              markdownTableStyle,
+              parser,
+              plugins: [plugin],
+            };
+            const builtin = await prettier.format(source, {
+              endOfLine: lineEnding.endOfLine,
+              parser,
+            });
+            const context = `${parser}, ${markdownTableStyle}, ${lineEnding.endOfLine}`;
+
+            expect(builtin, context).toContain(protectedText);
+
+            const result = await prettier.formatWithCursor(source, {
+              ...options,
+              cursorOffset: source.indexOf('uneven'),
+            });
+
+            expect(result.formatted, context).toContain(protectedText);
+            expect(result.formatted, context).toBe(
+              normalizeMarkdownTables(builtin, { markdownTableStyle }),
+            );
+            expect(result.formatted, context).not.toBe(builtin);
+            expect(result.cursorOffset, context).toBe(
+              result.formatted.indexOf('uneven'),
+            );
+            await expect(
+              prettier.format(result.formatted, options),
+              context,
+            ).resolves.toBe(result.formatted);
+          }
+        }
+      }
+    });
+  }
+
   for (const fixture of FORMAT_FIXTURES) {
     for (const style of FIXTURE_STYLES) {
       test(`given ${fixture.fileName} and ${style} style, when formatting, then output stays stable`, async () => {

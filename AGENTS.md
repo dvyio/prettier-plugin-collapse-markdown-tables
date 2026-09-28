@@ -28,6 +28,7 @@ Built with TypeScript, Prettier, Vitest, esbuild, ESLint, Knip, and Husky. Check
 - Row repair needs evidence. Merge split fragments only for open code spans or odd escaped pipes.
 - Rows with extra real cells must stay unchanged. Do not silently change the cell count.
 - Protected regions must stay untouched: fenced code, indented code, front matter, HTML comments, raw HTML blocks, Prettier ignore ranges, MDX JSX, and MDX ESM.
+- Use literal line breaks when converting printed Markdown back to a Prettier Doc. This preserves trailing whitespace Prettier kept, such as hard breaks and ignored text.
 - Range formatting must only rewrite tables that intersect the requested range. Keep `rangeStart`, `rangeEnd`, and `cursorOffset` attached to the same logical text after table padding changes.
 - Use line-local offset mapping only for transforms that preserve line boundaries. Arbitrary Prettier output needs the global text mapper even when its line count happens to match.
 
@@ -68,6 +69,8 @@ Built with TypeScript, Prettier, Vitest, esbuild, ESLint, Knip, and Husky. Check
 - In the latest-Prettier CI lane, install Prettier in an empty temporary prefix and replace only `node_modules/prettier`. Do not run `npm install` over the lockfile tree.
 - The lockfile Prettier owns source formatting. The latest-Prettier lane uses `check:prettier-latest`, which checks compatibility without applying a different minor release's source style.
 - Run the narrow relevant test early, then run the full gate before done.
+- Expect `dist` to change when you run `tests/prettierPlugin.test.ts`, even with a name filter. Its setup hook runs the build.
+- If npm's cache blocks package tests, set `npm_config_cache` to a fresh directory under `/private/tmp` for that command.
 - Final TypeScript gate: `npm run lint:fix && npm run format:fix && npm run check`.
 - For Markdown table behavior changes, run `npm run format:dogfood:fix` before the final gate.
 - Release or package-shape changes also need `npm run pack:check`.

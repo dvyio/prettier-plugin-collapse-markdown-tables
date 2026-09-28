@@ -73,7 +73,7 @@ type MarkdownParserName = 'markdown' | 'mdx' | 'remark';
 type MarkdownPrint = Parameters<Printer<MarkdownNode>['print']>[2];
 
 const { printDocToString } = docPrinter;
-const { hardline, join } = builders;
+const { join, literalline } = builders;
 
 const PREPROCESS_ERROR_MESSAGE =
   'Could not preprocess Markdown before table normalization.';
@@ -243,7 +243,7 @@ function sourceMayContainMarkdownTable(
 function markdownToDoc(markdown: string): Doc {
   const lines = markdown.split(/\r\n|\n|\r/);
 
-  return join(hardline, lines);
+  return join(literalline, lines);
 }
 
 function withRangeTableNormalization(
