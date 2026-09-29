@@ -441,6 +441,10 @@ describe('prettier plugin', () => {
 
   test.each([
     {
+      getCellText: ([headerCode, bodyCode]: ReadonlyArray<string>) => [
+        [`use ${headerCode}`, 'or c'],
+        [`then ${bodyCode}`, 'f'],
+      ],
       label: 'plain short separators',
       source: [
         'Notes:',
@@ -451,23 +455,60 @@ describe('prettier plugin', () => {
       ].join('\n'),
     },
     {
+      getCellText: ([headerCode, bodyCode]: ReadonlyArray<string>) => [
+        ['a', headerCode],
+        [`then ${bodyCode}`, 'f'],
+      ],
       label: 'aligned short separators',
       source: ['intro', 'a | `x|y`', ':- | -: | -', 'then `d|e` | f', ''].join(
         '\n',
       ),
     },
   ])(
-    'given a paragraph with $label, when formatting, then preserves Prettier output exactly',
-    async ({ source }) => {
+    'given $label beside inline code, when formatting, then preserves paragraph text and printed table contents',
+    async ({ getCellText, source }) => {
       for (const parser of ['markdown', 'mdx', 'remark'] as const) {
         const expected = await prettier.format(source, { parser });
+        const builtinTables = await parseTableSemantics(source, parser);
 
         for (const markdownTableStyle of ['spaced', 'compact'] as const) {
           const options = { markdownTableStyle, parser, plugins: [plugin] };
           const formatted = await prettier.format(source, options);
           const label = `${parser} ${markdownTableStyle}`;
 
-          expect(formatted, label).toBe(expected);
+          if (builtinTables.length === 0) {
+            expect(formatted, label).toBe(expected);
+          } else {
+            // Newer Prettier versions parse these as tables; preserve the text its printer produced.
+            expect(formatted.split('\n')[0], label).toBe(
+              expected.split('\n')[0],
+            );
+            const codeSpans = expected.match(/`[^`]+`/gu) ?? [];
+
+            for (const codeSpan of codeSpans) {
+              expect(formatted.replaceAll('\\|', '|'), label).toContain(
+                codeSpan.replaceAll('\\|', '|'),
+              );
+            }
+            const tables = await parseTableSemantics(formatted, parser);
+
+            expect(
+              tables.map((table) =>
+                table.rows.map((row) =>
+                  row.map((cell) =>
+                    cell.map((node) => node.value ?? '').join(''),
+                  ),
+                ),
+              ),
+              label,
+            ).toEqual([
+              getCellText(
+                codeSpans.map((span) =>
+                  span.slice(1, -1).replaceAll('\\|', '|'),
+                ),
+              ),
+            ]);
+          }
           expect(await prettier.format(formatted, options), label).toBe(
             formatted,
           );

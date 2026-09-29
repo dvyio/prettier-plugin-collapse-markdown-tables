@@ -81,6 +81,7 @@ Built with TypeScript, Prettier, Vitest, esbuild, ESLint, Knip, and Husky. Check
 - Type printer callbacks from the installed Prettier `Printer` signature. Prettier 3 minor releases may widen the callback without changing runtime behavior.
 - In the latest-Prettier CI lane, install Prettier in an empty temporary prefix and replace only `node_modules/prettier`. Do not run `npm install` over the lockfile tree.
 - The lockfile Prettier owns source formatting. The latest-Prettier lane uses `check:prettier-latest`, which checks compatibility without applying a different minor release's source style.
+- Before a release, also run `check:prettier-latest` with a temporary latest Prettier 3 install. Restore the lockfile version before normal formatting checks.
 - Run the narrow relevant test early, then run the full gate before done.
 - Expect `dist` to change when you run `tests/prettierPlugin.test.ts`, even with a name filter. Its setup hook runs the build.
 - If npm's cache blocks package tests, set `npm_config_cache` to a fresh directory under `/private/tmp` for that command.
