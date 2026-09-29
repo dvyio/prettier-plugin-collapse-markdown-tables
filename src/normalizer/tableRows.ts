@@ -584,7 +584,8 @@ function skipMarkdownLineSeparator(markdown: string, lineEnd: number): number {
   return lineEnd + 1;
 }
 
-function isPotentialMarkdownDelimiterLine(line: string): boolean {
+/** Recognizes possible source separator lines, including Prettier's short forms. */
+export function isPotentialMarkdownDelimiterLine(line: string): boolean {
   const text = line
     .replace(/^\uFEFF/, '')
     .replace(/^[ \t]*(?:>[ \t]*)*/, '')
@@ -596,7 +597,7 @@ function isPotentialMarkdownDelimiterLine(line: string): boolean {
 
   const cells = getPotentialDelimiterCells(text);
 
-  return cells.length > 0 && cells.every(isValidDelimiterCell);
+  return cells.length > 0 && cells.every(isPotentialDelimiterCell);
 }
 
 function getPotentialDelimiterCells(text: string): ReadonlyArray<string> {
@@ -629,8 +630,13 @@ function textRangeIntersectsNormalizationRange(
   return start < range.end && end > range.start;
 }
 
+/** Recognizes source separators, including short forms Prettier expands when printing. */
+function isPotentialDelimiterCell(cell: string): boolean {
+  return /^:?-+:?$/.test(cell);
+}
+
 function isValidDelimiterCell(cell: string): boolean {
-  if (!/^:?-+:?$/.test(cell)) {
+  if (!isPotentialDelimiterCell(cell)) {
     return false;
   }
 
@@ -640,16 +646,27 @@ function isValidDelimiterCell(cell: string): boolean {
   return hyphenCount >= 3 || (hasAlignmentMarker && cell.length >= 3);
 }
 
-/** Returns the column count only when every cell is a valid table delimiter. */
+/** Counts source separators, including short forms Prettier has not printed yet. */
+export function getPotentialDelimiterColumnCount(
+  cells: ReadonlyArray<string>,
+): ColumnCount | undefined {
+  return getDelimiterColumnCount(cells, isPotentialDelimiterCell);
+}
+
+/** Counts delimiter cells using the strict rule: at least three dashes, or at least three characters including an alignment colon. */
 export function getValidDelimiterColumnCount(
   cells: ReadonlyArray<string>,
 ): ColumnCount | undefined {
+  return getDelimiterColumnCount(cells, isValidDelimiterCell);
+}
+
+function getDelimiterColumnCount(
+  cells: ReadonlyArray<string>,
+  isDelimiterCell: (cell: string) => boolean,
+): ColumnCount | undefined {
   const delimiterCells = cells.map((cell) => cell.trim());
 
-  if (
-    delimiterCells.length === 0 ||
-    !delimiterCells.every(isValidDelimiterCell)
-  ) {
+  if (delimiterCells.length === 0 || !delimiterCells.every(isDelimiterCell)) {
     return undefined;
   }
 

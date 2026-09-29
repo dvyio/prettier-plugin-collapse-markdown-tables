@@ -7,10 +7,12 @@ import type {
   ColumnCount,
   ContainerKey,
   LineIndex,
+  MarkdownColumn,
   MarkdownOffset,
 } from './types.js';
 
 import {
+  countMarkdownColumns,
   getLineStartOffsets,
   getNormalizationRange,
   isCompatibleContainerKey,
@@ -24,8 +26,11 @@ import {
   toMarkdownOffset,
 } from './lineUtils.js';
 import {
+  canListItemInterruptParagraph,
   findProtectedLines,
+  isThematicBreak,
   parseContainerLine,
+  parseContinuationContainerLine,
   parsePrettierIgnoreDirective,
 } from './protectedRegions.js';
 import {
@@ -57,6 +62,12 @@ type PrettierTableCandidate = {
   readonly end: LineIndex;
   readonly rows: ReadonlyArray<PrettierParsedTableRow>;
   readonly start: LineIndex;
+};
+
+type PrettierTableStart = {
+  readonly delimiterColumnCount: ColumnCount;
+  readonly header: PrettierParsedTableRow;
+  readonly separator: PrettierParsedTableRow;
 };
 
 type PrettierTableBlock = {
@@ -91,15 +102,22 @@ export function repairPrettierWidenedTableDelimiters(
   let changed = false;
 
   for (let index = 0; index < lines.length; index++) {
-    const tableCandidate = findPrettierTableCandidate(
+    const tableStart = findPrettierTableStart(
       lines,
       toLineIndex(index),
       protectedLines,
+      getValidDelimiterColumnCount,
     );
 
-    if (tableCandidate === undefined) {
+    if (tableStart === undefined) {
       continue;
     }
+
+    const tableCandidate = scanPrettierTableRows(
+      lines,
+      tableStart,
+      protectedLines,
+    );
 
     if (
       isRecoverableWidenedTableDelimiter(tableCandidate) &&
@@ -146,10 +164,13 @@ export function repairPrettierWidenedTableDelimiters(
 
 /**
  * Escapes pipes inside closed code spans without otherwise rewriting table rows.
+ *
+ * @param getDelimiterColumnCount - Use source rules before parsing and printed rules after printing.
  */
 export function escapeMarkdownTableCodeSpanPipes(
   markdown: string,
   options: NormalizeMarkdownTablesOptions,
+  getDelimiterColumnCount: typeof getValidDelimiterColumnCount,
 ): EscapedMarkdown {
   if (!markdown.includes('`') || !mayContainMarkdownTableCandidate(markdown)) {
     return { insertedBackslashOffsets: [], markdown };
@@ -171,6 +192,7 @@ export function escapeMarkdownTableCodeSpanPipes(
       lines,
       toLineIndex(index),
       protectedLines,
+      getDelimiterColumnCount,
     );
 
     if (tableBlock === undefined) {
@@ -207,20 +229,28 @@ function findPrettierTableBlock(
   lines: ReadonlyArray<string>,
   start: LineIndex,
   protectedLines: ReadonlyArray<boolean>,
+  getDelimiterColumnCount: typeof getValidDelimiterColumnCount,
 ): PrettierTableBlock | undefined {
-  const tableCandidate = findPrettierTableCandidate(
+  const tableStart = findPrettierTableStart(
     lines,
     start,
     protectedLines,
+    getDelimiterColumnCount,
   );
-  const header = tableCandidate?.rows[0];
 
+  // Reject mismatched starts before scanning their bodies, but keep checking later row pairs.
   if (
-    tableCandidate === undefined ||
-    header?.cells.length !== tableCandidate.delimiterColumnCount
+    tableStart === undefined ||
+    tableStart.header.cells.length !== tableStart.delimiterColumnCount
   ) {
     return undefined;
   }
+
+  const tableCandidate = scanPrettierTableRows(
+    lines,
+    tableStart,
+    protectedLines,
+  );
 
   return {
     columnCount: tableCandidate.delimiterColumnCount,
@@ -230,11 +260,12 @@ function findPrettierTableBlock(
   };
 }
 
-function findPrettierTableCandidate(
+function findPrettierTableStart(
   lines: ReadonlyArray<string>,
   start: LineIndex,
   protectedLines: ReadonlyArray<boolean>,
-): PrettierTableCandidate | undefined {
+  getDelimiterColumnCount: typeof getValidDelimiterColumnCount,
+): PrettierTableStart | undefined {
   if (
     start + 1 >= lines.length ||
     protectedLines[start] === true ||
@@ -244,26 +275,46 @@ function findPrettierTableCandidate(
   }
 
   const header = parsePrettierTableRow(lines[start] ?? '', start);
-  const separator = parsePrettierTableRow(lines[start + 1] ?? '', start + 1);
 
   if (
     header === undefined ||
-    separator === undefined ||
     isPrettierIgnoredTableStart(lines, start, header) ||
-    separator.startsListItem ||
+    !header.balanced
+  ) {
+    return undefined;
+  }
+
+  const separator = parsePrettierTableSeparator(
+    lines,
+    start,
+    header,
+    protectedLines,
+  );
+
+  if (
+    separator === undefined ||
     !hasCompatiblePrettierTableContainer(separator, header) ||
-    !header.balanced ||
     !separator.balanced
   ) {
     return undefined;
   }
 
-  const delimiterColumnCount = getValidDelimiterColumnCount(separator.cells);
+  const delimiterColumnCount = getDelimiterColumnCount(separator.cells);
 
   if (delimiterColumnCount === undefined) {
     return undefined;
   }
 
+  return { delimiterColumnCount, header, separator };
+}
+
+function scanPrettierTableRows(
+  lines: ReadonlyArray<string>,
+  tableStart: PrettierTableStart,
+  protectedLines: ReadonlyArray<boolean>,
+): PrettierTableCandidate {
+  const { delimiterColumnCount, header, separator } = tableStart;
+  const start = header.lineIndex;
   const rows = [header, separator];
   let end = start + 1;
 
@@ -292,6 +343,99 @@ function findPrettierTableCandidate(
     rows,
     start,
   };
+}
+
+/**
+ * When a separator line starts with a list marker, as in `- | -`, read the marker as separator text.
+ * Only do this when the header starts a new block and the separator is not left of the header text.
+ */
+function parsePrettierTableSeparator(
+  lines: ReadonlyArray<string>,
+  start: LineIndex,
+  header: PrettierParsedTableRow,
+  protectedLines: ReadonlyArray<boolean>,
+): PrettierParsedTableRow | undefined {
+  const line = lines[start + 1] ?? '';
+  const containerLine = parseContainerLine(line);
+
+  if (!containerLine.startsListItem) {
+    return parsePrettierTableRow(line, start + 1, containerLine);
+  }
+
+  const separator = parsePrettierTableRow(
+    line,
+    start + 1,
+    parseContinuationContainerLine(line),
+  );
+  const originalHeaderLine = lines[start] ?? '';
+  const headerLine = stripRootByteOrderMark(originalHeaderLine, start);
+  const headerColumn = countMarkdownColumns(
+    headerLine,
+    header.contentStart - (originalHeaderLine.length - headerLine.length),
+  );
+
+  if (
+    separator === undefined ||
+    countMarkdownColumns(line, separator.contentStart) < headerColumn ||
+    !headerStartsNewBlock(lines, header, headerColumn, protectedLines)
+  ) {
+    return undefined;
+  }
+
+  return separator;
+}
+
+function headerStartsNewBlock(
+  lines: ReadonlyArray<string>,
+  header: PrettierParsedTableRow,
+  headerColumn: MarkdownColumn,
+  protectedLines: ReadonlyArray<boolean>,
+): boolean {
+  const start = header.lineIndex;
+  const previousLine = lines[start - 1];
+
+  if (previousLine === undefined || previousLine.trim() === '') {
+    return true;
+  }
+
+  const headerLine = stripRootByteOrderMark(lines[start] ?? '', start);
+  const headerContainer = parseContinuationContainerLine(headerLine);
+  const previousContainer = parseContinuationContainerLine(previousLine);
+
+  if (
+    header.startsListItem &&
+    canListItemInterruptParagraph(headerContainer.content)
+  ) {
+    return true;
+  }
+
+  if (headerContainer.key !== previousContainer.key) {
+    return (
+      previousContainer.key === ROOT_CONTAINER_KEY ||
+      headerContainer.key.startsWith(`${previousContainer.key}/blockquote`)
+    );
+  }
+
+  if (isThematicBreak(previousContainer.content)) {
+    return true;
+  }
+
+  const previous = parseContainerLine(previousLine);
+
+  if (
+    previous.startsListItem &&
+    headerColumn < countMarkdownColumns(previousLine, previous.contentStart)
+  ) {
+    return false;
+  }
+
+  const previousContent = previous.content.trim();
+
+  return (
+    previousContent === '' ||
+    isTableInterruptingBlockStart(previousContent) ||
+    protectedLines[start - 1] === true
+  );
 }
 
 function isPrettierIgnoredTableStart(
@@ -338,10 +482,10 @@ function isPrettierIgnoredTableStart(
 function parsePrettierTableRow(
   line: string,
   index: number,
+  containerLine = parseContainerLine(stripRootByteOrderMark(line, index)),
 ): PrettierParsedTableRow | undefined {
   const strippedLine = stripRootByteOrderMark(line, index);
   const byteOrderMarkLength = line.length - strippedLine.length;
-  const containerLine = parseContainerLine(strippedLine);
   const leadingWhitespace = /^[ \t]*/.exec(containerLine.content)?.[0] ?? '';
   const content = containerLine.content.slice(leadingWhitespace.length);
   const contentStart = toMarkdownOffset(

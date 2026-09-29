@@ -31,7 +31,11 @@ import {
   MARKDOWN_TABLE_FENCED_CODE_OPTIONS,
   MARKDOWN_TABLE_STYLE_OPTIONS,
 } from './normalizer/publicTypes.js';
-import { mayContainMarkdownTableCandidate } from './normalizer/tableRows.js';
+import {
+  getPotentialDelimiterColumnCount,
+  getValidDelimiterColumnCount,
+  mayContainMarkdownTableCandidate,
+} from './normalizer/tableRows.js';
 import {
   getPreprocessedNormalizeOptions,
   getPrintedNormalizeOptions,
@@ -199,7 +203,11 @@ function normalizePrintedMarkdownThroughAdapter(
     const escaped =
       repaired === formatted
         ? formatted
-        : escapeMarkdownTableCodeSpanPipes(repaired, normalizeOptions).markdown;
+        : escapeMarkdownTableCodeSpanPipes(
+            repaired,
+            normalizeOptions,
+            getValidDelimiterColumnCount,
+          ).markdown;
     const normalized = normalizeMarkdownTables(escaped, normalizeOptions);
 
     if (normalized === formatted) {
@@ -413,7 +421,11 @@ function normalizeMarkdownTablesInRequestedRange(
     enableMdxEsm,
     enableMdxJsx,
   );
-  const escaped = escapeMarkdownTableCodeSpanPipes(markdown, normalizeOptions);
+  const escaped = escapeMarkdownTableCodeSpanPipes(
+    markdown,
+    normalizeOptions,
+    getPotentialDelimiterColumnCount,
+  );
   remapPrettierRangeStateAfterInsertions(
     options,
     markdown,

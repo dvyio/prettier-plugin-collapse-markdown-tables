@@ -22,7 +22,8 @@ Files:
 Checklist:
 
 - Parser wrapping keeps Prettier's original `rangeStart`, `rangeEnd`, and `cursorOffset` attached to the same logical text after preprocessing. Known insertions use exact original UTF-16 offsets. Line-local mapping is limited to transforms that preserve line boundaries.
-- Parser preprocessing escapes inline-code pipes only in safe table rows and leaves all other source text unchanged before parsing. Its table scan accepts optional outer pipes, stops at block starts and fresh list items, and checks semantic container blanks for `prettier-ignore` without loosening the direct helper.
+- Parser preprocessing escapes inline-code pipes only in safe table rows and otherwise preserves source text. Its source scan accepts optional outer pipes and short separators (`-`, `--`, `:-`, and `-:`). It stops at block starts and fresh list items, and strips container prefixes when checking blank lines for `prettier-ignore`.
+- Repair and re-escaping use strict delimiter validation (`getValidDelimiterColumnCount`) on Prettier's printed output. Paragraphs containing short dash-and-pipe lines stay unchanged.
 - Root printing repairs a surplus delimiter suffix only when every real row matches the header and closed inline-code pipes exactly explain the extra columns.
 - Root printer rewriting only changes requested ranges during range formatting.
 - Doc conversion with `printDocToString` does not place embedded newlines inside Prettier doc strings.
@@ -55,9 +56,10 @@ Files:
 
 Checklist:
 
-- Table detection still requires safe pipe-wrapped rows and valid delimiter rows.
+- Direct helper table detection requires safe pipe-wrapped rows and strict delimiter validation.
 - Range handling normalizes only tables that intersect the requested range.
 - Protected-region scanning still skips front matter, protected code fences, indented code, comments, HTML blocks, raw HTML, MDX JSX, MDX ESM, and Prettier ignore ranges.
+- HTML and MDX `prettier-ignore` directives protect following tables, including tables in every item of an ignored list and inside ignored blockquotes. Direct helper and plugin tests cover consecutive directives.
 - Row parsing keeps list and blockquote prefixes stable.
 - Code spans follow CommonMark rules: matching delimiter-run length, literal backslashes inside spans, escaped opening backticks only with odd backslashes, and unmatched spans marked unsafe.
 - Escaped pipes use odd/even backslash counts in cell scanning, row repair, and rendering.

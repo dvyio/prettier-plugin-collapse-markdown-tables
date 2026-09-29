@@ -18,9 +18,14 @@ Parser-behaviour changes need a changelog entry when they affect which table-sha
 
 ## Unreleased
 
+## 0.3.0 - 2026-09-29
+
 ### Fixed
 
 - Kept trailing spaces, including two-space hard breaks, in paragraphs, raw HTML, and `prettier-ignore` text when another table in the file collapses.
+- Collapsed tables with short separator cells (`-`, `--`, `:-`, and `-:`) on the first formatting run. Pipes inside inline code no longer create extra columns.
+- Kept tables throughout ignored lists unchanged in the plugin and `normalizeMarkdownTables`, including lists with unindented paragraph lines. Both HTML and MDX directives work; tables in parent siblings still collapse.
+- Stopped repeatedly scanning pipe-and-dash-heavy text with mismatched column counts, keeping formatting time in step with file size.
 
 ## 0.2.1 - 2026-08-13
 

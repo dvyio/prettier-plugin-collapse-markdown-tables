@@ -21,13 +21,19 @@ Built with TypeScript, Prettier, Vitest, esbuild, ESLint, Knip, and Husky. Check
 - Default table output is `spaced`. `compact` removes cell padding. `prettier` returns Prettier's aligned output unchanged.
 - Preserve alignment markers, empty cells, missing trailing cells, list and blockquote prefixes, and existing line ending style.
 - Parser preprocessing may escape pipes inside closed code spans in safe table rows. It accepts optional outer pipes, but the direct helper's scan stays strict.
+- Source candidate scans must accept short separators (`-`, `--`, `:-`, and `-:`) before Prettier expands them. The direct helper keeps strict delimiter checks.
+- `findPrettierTableStart` scans both source and Prettier's printed output. Loosen delimiter detection only for source preprocessing; printed repair and re-escaping must use `getValidDelimiterColumnCount` so paragraphs stay unchanged.
 - Track each inserted backslash in original UTF-16 coordinates. Preserve all other source text. Leave collapsing and ambiguous-row repair until after Prettier parses the document.
 - Repair a Prettier-widened delimiter only when every real row still matches the header and closed code-span pipes exactly explain the surplus columns.
 - Scan wide table cells by source offsets and slice at delimiters. Do not rebuild cells one character at a time.
 - Parser preprocessing must stop at Markdown block starts and fresh sibling list markers. Check blank lines after stripping their container markers before applying `prettier-ignore`.
+- Apply separator indentation and block-start checks only when the separator itself starts a list item. Ordinary separators may sit left of a list header's text.
+- Reject header/separator column mismatches before scanning table bodies during preprocessing. Keep checking later row pairs so recoverable tables are not skipped.
 - Row repair needs evidence. Merge split fragments only for open code spans or odd escaped pipes.
 - Rows with extra real cells must stay unchanged. Do not silently change the cell count.
 - Protected regions must stay untouched: fenced code, indented code, front matter, HTML comments, raw HTML blocks, Prettier ignore ranges, MDX JSX, and MDX ESM.
+- Ignored lists include every sibling item with the same bullet or ordered-list delimiter, but stop before the containing item's siblings. Use the parent's content column as the lower boundary; Prettier allows siblings to shift indentation within that boundary. Track each item's content column using CommonMark's list padding rules. Do not count separators or protected text as parent list markers.
+- Keep lazy lines inside ignored lists when the previous line is nonblank. ATX headings, fences, horizontal rules, and different list markers end those continuations.
 - Use literal line breaks when converting printed Markdown back to a Prettier Doc. This preserves trailing whitespace Prettier kept, such as hard breaks and ignored text.
 - Range formatting must only rewrite tables that intersect the requested range. Keep `rangeStart`, `rangeEnd`, and `cursorOffset` attached to the same logical text after table padding changes.
 - Use line-local offset mapping only for transforms that preserve line boundaries. Arbitrary Prettier output needs the global text mapper even when its line count happens to match.
@@ -37,6 +43,7 @@ Built with TypeScript, Prettier, Vitest, esbuild, ESLint, Knip, and Husky. Check
 - Add `@fileoverview` to source and config files you create or substantially change. Keep it as the first doc comment.
 - Public exports need short JSDoc that says what the function or type is for.
 - Prefer small, focused modules under the normalizer. Split only when a rule has a clear boundary, such as protected regions, row parsing, repair, rendering, or line/range helpers.
+- Reuse named Markdown block checks between table preprocessing and protected-region scanning. Keep list-prefix stripping, item padding, and paragraph interruption separate.
 - Keep imports and object/type keys sorted the way ESLint expects. Let the fixer do mechanical sorting.
 - Use type imports for types. Keep arrays readonly where callers should not mutate them.
 - Throw `Error` with a clear message at boundaries. Do not log from normalizer code.
@@ -45,12 +52,16 @@ Built with TypeScript, Prettier, Vitest, esbuild, ESLint, Knip, and Husky. Check
 
 - Test names use the BDD style already in the suite: `given ..., when ..., then ...`.
 - Bug fixes need a failing regression test first.
+- Test short-separator tables in a document with no other tables. Another valid table can hide a broken candidate scan.
+- For separator-context checks, cover nested blockquotes, a bare `>` line, and headers left of list-item text.
 - Prefer behavior tests over implementation tests. If the same input and output would still pass after a rewrite, the test is probably at the right level.
 - Use direct helper tests for row parsing, protected regions, malformed rows, code spans, escaped pipes, CRLF/CR-only input, range limits, and performance limits.
+- Cover both HTML and MDX ignore directives when changing shared ignore handling. Include the source in assertion messages for test loops.
+- Test ignored-list block boundaries with a following table indented inside the list. Otherwise, outdenting can hide a missing boundary check.
 - Use Prettier API and CLI tests for plugin loading, parser wrapping, Markdown/MDX/remark behavior, style options, range formatting, cursor offsets, fixtures, snapshots, and package compatibility.
 - Compatibility tests must not pin whitespace or adjacent mdast text-node splits that belong to Prettier. Compute built-in output with the installed version, then assert this plugin's style, protected text, table meaning, and idempotence.
 - Use the audit checklist before changing parser wrapping, range handling, protected-region scanning, table repair, rendering, packaging, or fixture coverage.
-- Keep stress-only performance assertions behind `NORMALIZE_MARKDOWN_TABLES_STRESS=1`. Normal checks should catch hangs without failing on benchmark noise.
+- Keep stress-only performance assertions behind `NORMALIZE_MARKDOWN_TABLES_STRESS=1`. Do not skip output assertions with them. Normal checks should catch hangs without failing on benchmark noise.
 - Give plugin performance tests an outer Vitest timeout longer than their internal formatter deadline. Coverage instrumentation can exceed Vitest's five-second default before the real deadline runs.
 
 ## Formatting And Dogfood
@@ -63,6 +74,8 @@ Built with TypeScript, Prettier, Vitest, esbuild, ESLint, Knip, and Husky. Check
 
 ## Workflow
 
+- Add a one-line `Unreleased` entry in `CHANGELOG.md` whenever a change can alter Markdown output. Include changes to table detection, protected regions, and range or cursor handling.
+- Check claimed changelog fixes against the previous version. Adding regression coverage for working behavior is not a new fix.
 - Before code changes, read the target file and the closest test file. For exported behavior, also search for callers and CLI/API coverage.
 - For parser wrapping, range handling, protected regions, table repair, rendering, or package shape, read the matching section in `docs/audit-checklist.md` before editing.
 - Type printer callbacks from the installed Prettier `Printer` signature. Prettier 3 minor releases may widen the callback without changing runtime behavior.

@@ -3,8 +3,361 @@ import * as prettierMarkdownPlugin from 'prettier/plugins/markdown';
 import { describe, expect, test } from 'vitest';
 
 import plugin from '../src/index.js';
+import { normalizeMarkdownTables } from '../src/normalizeMarkdownTables.js';
+
+const IGNORE_DIRECTIVE_CASES = [
+  { directive: '<!-- prettier-ignore -->', parser: 'markdown' },
+  { directive: '{/* prettier-ignore */}', parser: 'mdx' },
+] as const;
 
 describe('Markdown table parser preprocessing', () => {
+  test('given matching rows follow a mismatched separator, when formatting, then preserves code inside the recovered table', async () => {
+    for (const prefix of ['', '> ']) {
+      const source = [
+        '| Old | Shape |',
+        '| --- | --- | --- |',
+        '| Name | Note |',
+        '| --- | --- |',
+        '| one | `x|y` |',
+        '',
+      ]
+        .map((line) => `${prefix}${line}`)
+        .join('\n');
+      const repaired = source
+        .replace('| --- | --- | --- |', '| --- | --- |')
+        .replace('`x|y`', '`x\\|y`');
+
+      for (const parser of ['markdown', 'mdx', 'remark'] as const) {
+        const builtin = await prettier.format(repaired, { parser });
+
+        for (const markdownTableStyle of [
+          'spaced',
+          'compact',
+          'prettier',
+        ] as const) {
+          const options = { markdownTableStyle, parser, plugins: [plugin] };
+          const formatted = await prettier.format(source, options);
+          const label = `${parser} ${markdownTableStyle}\n${source}`;
+
+          expect(formatted, label).toBe(
+            normalizeMarkdownTables(builtin, { markdownTableStyle }),
+          );
+          expect(await prettier.format(formatted, options), label).toBe(
+            formatted,
+          );
+        }
+      }
+    }
+  });
+
+  test('given an unindented separator under a list table header, when formatting, then preserves inline-code contents', async () => {
+    const sources = [
+      ['- Name | Role', '--- | ---', 'Value | `a|b`', ''].join('\n'),
+      ['> 1. Name | Role', '> --- | ---', '> Value | `a|b`', ''].join('\n'),
+    ];
+
+    for (const source of sources) {
+      for (const parser of ['markdown', 'mdx', 'remark'] as const) {
+        const builtin = await prettier.format(
+          source.replace('`a|b`', '`a\\|b`'),
+          { parser },
+        );
+
+        for (const markdownTableStyle of [
+          'spaced',
+          'compact',
+          'prettier',
+        ] as const) {
+          const options = { markdownTableStyle, parser, plugins: [plugin] };
+          const formatted = await prettier.format(source, options);
+          const label = `${parser} ${markdownTableStyle} ${source}`;
+
+          expect(formatted, label).toBe(
+            normalizeMarkdownTables(builtin, { markdownTableStyle }),
+          );
+          expect(formatted, label).toContain('`a\\|b`');
+          expect(await prettier.format(formatted, options), label).toBe(
+            formatted,
+          );
+        }
+      }
+    }
+  });
+
+  test('given a paragraph continuation followed by a dash list item, when formatting, then leaves paragraph code pipes untouched', async () => {
+    for (const introduction of [
+      'intro',
+      '- item',
+      '- # Heading',
+      '> prior',
+      '>',
+      '> # heading',
+      '> ```\n> code\n> ```',
+      '===',
+    ]) {
+      const source = [introduction, 'a | `x|y`', '- | -', ''].join('\n');
+
+      for (const parser of ['markdown', 'mdx', 'remark'] as const) {
+        const expected = await prettier.format(source, { parser });
+
+        for (const markdownTableStyle of [
+          'spaced',
+          'compact',
+          'prettier',
+        ] as const) {
+          const options = { markdownTableStyle, parser, plugins: [plugin] };
+          const formatted = await prettier.format(source, options);
+          const label = `${parser} ${markdownTableStyle}\n${source}`;
+
+          expect(formatted, label).toBe(expected);
+          expect(await prettier.format(formatted, options), label).toBe(
+            formatted,
+          );
+        }
+      }
+    }
+  });
+
+  test('given short separators follow a new block, when formatting, then still protects table code pipes', async () => {
+    const sources = [
+      '\uFEFFName | Note\n- | -\none | `a|b`\n',
+      '# Heading\nName | Note\n- | -\none | `a|b`\n',
+      '***\nName | Note\n- | -\none | `a|b`\n',
+      '* * *\nName | Note\n- | -\none | `a|b`\n',
+      '- - -\nName | Note\n- | -\none | `a|b`\n',
+      '```text\ncode\n```\nName | Note\n- | -\none | `a|b`\n',
+      'intro\n> Name | Note\n> - | -\n> one | `a|b`\n',
+      '> intro\n> > Name | Note\n> > - | -\n> > one | `a|b`\n',
+      '> intro\n>\n> Name | Note\n> - | -\n> one | `a|b`\n',
+      '> # Heading\n> Name | Note\n> - | -\n> one | `a|b`\n',
+      'intro\n- Name | Note\n  - | -\n  one | `a|b`\n',
+      'intro\n1. Name | Note\n   - | -\n   one | `a|b`\n',
+      '2. Name | Note\n   - | -\n   one | `a|b`\n',
+      '- # Heading\n  Name | Note\n  - | -\n  one | `a|b`\n',
+    ];
+
+    for (const source of sources) {
+      const expected = await formatWithBuiltInPrettier(
+        source.replace('`a|b`', '`a\\|b`'),
+      );
+
+      expect(await formatWithPluginPrettierStyle(source), source).toBe(
+        expected,
+      );
+    }
+  });
+
+  test('given an ordered marker cannot interrupt a paragraph, when formatting, then leaves its code pipes untouched', async () => {
+    const source = ['intro', '2. Name | `a|b`', '   - | -', ''].join('\n');
+
+    expect(await formatWithPluginPrettierStyle(source)).toBe(
+      await formatWithBuiltInPrettier(source),
+    );
+  });
+
+  test('given consecutive ignore directives, when formatting, then keeps the following table unchanged', async () => {
+    for (const { directive, parser } of IGNORE_DIRECTIVE_CASES) {
+      for (const nextDirective of [
+        directive,
+        directive.replace('prettier-ignore', 'prettier-ignore-start'),
+      ]) {
+        const source = [
+          directive,
+          nextDirective,
+          '',
+          '| Name     | Note      |',
+          '| -------- | --------- |',
+          '| one      | two       |',
+          '',
+          directive.replace('prettier-ignore', 'prettier-ignore-end'),
+          '',
+        ].join('\n');
+
+        expect(
+          await prettier.format(source, {
+            parser,
+            plugins: [plugin],
+          }),
+          source,
+        ).toBe(await formatWithBuiltInPrettier(source, parser));
+      }
+    }
+  });
+
+  test('given sibling list items resemble short table delimiters, when formatting, then leaves their inline-code pipes untouched', async () => {
+    for (const prefix of ['', '> ']) {
+      for (const separator of ['-', '---']) {
+        const siblingItems = [
+          `${prefix}- | Name | Note | \`a|b\` |`,
+          `${prefix}- | ${separator} | ${separator} |`,
+          `${prefix}- | one | two | three |`,
+          '',
+        ].join('\n');
+        const continuedItem = [
+          `${prefix}- item`,
+          prefix,
+          `${prefix}  | Name | Note | \`a|b\` |`,
+          `${prefix}- | ${separator} | ${separator} |`,
+          `${prefix}- | one | two | three |`,
+          '',
+        ].join('\n');
+
+        for (const source of [siblingItems, continuedItem]) {
+          expect(await formatWithPluginPrettierStyle(source), source).toBe(
+            await formatWithBuiltInPrettier(source),
+          );
+        }
+      }
+    }
+  });
+
+  test('given ignored containers contain short separators, when formatting, then leaves their inline-code pipes untouched', async () => {
+    for (const separator of ['-', '--', ':-', '-:']) {
+      for (const outerPipe of ['', '|']) {
+        const table = [
+          `${outerPipe} Name | Note ${outerPipe}`,
+          `${outerPipe} ${separator} | ${separator} ${outerPipe}`,
+          `${outerPipe} one | \`a|b\` ${outerPipe}`,
+        ];
+        for (const { directive, parser } of IGNORE_DIRECTIVE_CASES) {
+          const sources = [
+            [
+              directive,
+              '- item',
+              '',
+              ...table.map((line) => `  ${line}`),
+              '',
+            ].join('\n'),
+            [
+              directive,
+              '> title',
+              '>',
+              ...table.map((line) => `> ${line}`),
+              '',
+            ].join('\n'),
+          ];
+
+          for (const source of sources) {
+            const withFollowingTable = `${source}\nName | Note\n${separator} | ${separator}\ntwo | \`c|d\`\n`;
+            const expected = await formatWithBuiltInPrettier(
+              withFollowingTable.replace('`c|d`', '`c\\|d`'),
+              parser,
+            );
+            const actual = await formatWithPluginPrettierStyle(
+              withFollowingTable,
+              parser,
+            );
+            const label = `${parser}\n${withFollowingTable}`;
+
+            expect(actual, label).toBe(expected);
+            expect(actual, label).toContain('`a|b`');
+            expect(actual, label).toContain('`c\\|d`');
+          }
+        }
+      }
+    }
+  });
+
+  test('given an ignored list has code pipes in a later item, when formatting, then leaves the whole list unchanged', async () => {
+    for (const { directive, parser } of IGNORE_DIRECTIVE_CASES) {
+      for (const secondItem of ['- Second', '-     code']) {
+        const source = [
+          directive,
+          '- First',
+          '  | Name     | Note      |',
+          '  | -------- | --------- |',
+          '  | one      | first     |',
+          '',
+          secondItem,
+          '',
+          '  | Name     | Note      |',
+          '  | -------- | --------- |',
+          '  | two      | `a|b`     |',
+          '',
+        ].join('\n');
+
+        expect(
+          await formatWithPluginPrettierStyle(source, parser),
+          source,
+        ).toBe(await formatWithBuiltInPrettier(source, parser));
+      }
+    }
+  });
+
+  test('given an ignored list starts with a lazy paragraph line, when formatting, then preserves later tables and their code pipes', async () => {
+    for (const { directive, parser } of IGNORE_DIRECTIVE_CASES) {
+      const source = [
+        directive,
+        '- foo',
+        'bar',
+        '- item',
+        '',
+        '  | a   | b       |',
+        '  | --- | ------- |',
+        '  | one | `x|y`   |',
+        '',
+      ].join('\n');
+      const expected = await formatWithBuiltInPrettier(source, parser);
+
+      for (const markdownTableStyle of [
+        'spaced',
+        'compact',
+        'prettier',
+      ] as const) {
+        const options = { markdownTableStyle, parser, plugins: [plugin] };
+        const formatted = await prettier.format(source, options);
+        const label = `${markdownTableStyle}\n${source}`;
+
+        expect(formatted, label).toBe(expected);
+        expect(await prettier.format(formatted, options), label).toBe(
+          formatted,
+        );
+      }
+    }
+  });
+
+  test('given an ignore directive before a nested list, when formatting a parent sibling table, then collapses that table', async () => {
+    for (const { directive, parser } of IGNORE_DIRECTIVE_CASES) {
+      for (const [parentMarker, parentSibling] of [
+        ['-', '-'],
+        ['1.', '2.'],
+      ] as const) {
+        for (const [nestedMarker, nestedSibling] of [
+          ['-', '-'],
+          ['1.', '2.'],
+        ] as const) {
+          const indent = ' '.repeat(parentMarker.length + 1);
+          const source = [
+            `${parentMarker} item`,
+            '',
+            `${indent}${directive}`,
+            `${indent}${nestedMarker} x`,
+            `${indent}${nestedSibling} y`,
+            '',
+            `${parentSibling} sibling`,
+            '',
+            `${indent}| a   | b   |`,
+            `${indent}| --- | --- |`,
+            '',
+          ].join('\n');
+          const builtin = await formatWithBuiltInPrettier(source, parser);
+          const formatted = await prettier.format(source, {
+            parser,
+            plugins: [plugin],
+          });
+
+          expect(formatted, source).toBe(
+            builtin.replace(/\| a +\| b +\|/, '| a | b |'),
+          );
+          expect(
+            await prettier.format(formatted, { parser, plugins: [plugin] }),
+            source,
+          ).toBe(formatted);
+        }
+      }
+    }
+  });
+
   test('given a table is followed by an ATX-looking line with an inline-code pipe, when formatting, then leaves that line unchanged', async () => {
     const source = [
       '| A | B |',
@@ -44,8 +397,8 @@ describe('Markdown table parser preprocessing', () => {
       const expected = await formatWithBuiltInPrettier(source);
       const actual = await formatWithPluginPrettierStyle(source);
 
-      expect(actual).toBe(expected);
-      expect(actual).not.toContain('`a\\|b`');
+      expect(actual, source).toBe(expected);
+      expect(actual, source).not.toContain('`a\\|b`');
     }
   });
 
@@ -103,14 +456,16 @@ describe('Markdown table parser preprocessing', () => {
       const expected = await formatWithBuiltInPrettier(source);
       const actual = await formatWithPluginPrettierStyle(source);
 
-      expect(actual, marker).toBe(expected);
-      expect(actual, marker).not.toContain('`a\\|b`');
+      expect(actual, source).toBe(expected);
+      expect(actual, source).not.toContain('`a\\|b`');
     }
   });
 
   test('given a real table starts inside list containers, when formatting, then still protects its code pipes', async () => {
     const sources = [
       ['- Name | Role', '  --- | ---', '  Value | `a|b`', ''].join('\n'),
+      ['- Name | Role', '  - | -', '  Value | `a|b`', ''].join('\n'),
+      ['> 1. Name | Role', '>    - | -', '>    Value | `a|b`', ''].join('\n'),
       ['> 1. Name | Role', '>    --- | ---', '>    Value | `a|b`', ''].join(
         '\n',
       ),
@@ -121,7 +476,7 @@ describe('Markdown table parser preprocessing', () => {
       const expected = await formatWithBuiltInPrettier(validSource);
       const actual = await formatWithPluginPrettierStyle(source);
 
-      expect(actual).toBe(expected);
+      expect(actual, source).toBe(expected);
     }
   });
 

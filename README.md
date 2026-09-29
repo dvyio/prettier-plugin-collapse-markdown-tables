@@ -262,7 +262,7 @@ After Prettier prints the document, this plugin leaves these regions unchanged:
 - HTML comments
 - HTML blocks, including `pre`, `script`, and `style`
 - MDX JSX and ESM blocks
-- tables after `<!-- prettier-ignore -->`
+- tables after `<!-- prettier-ignore -->` or `{/* prettier-ignore */}`, including tables in every item of an ignored list and inside ignored blockquotes
 - tables inside `<!-- prettier-ignore-start -->` and `<!-- prettier-ignore-end -->`
 
 That does not always mean the original input is kept byte for byte. Prettier may still format embedded languages before this plugin runs. For example, Prettier can align a Markdown table inside a `markdown` code fence. Set `markdownTableFencedCode` to `markdown` when you want this plugin to collapse that fenced table too.

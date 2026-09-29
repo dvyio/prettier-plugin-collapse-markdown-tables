@@ -38,7 +38,11 @@ import {
   isMdxFlowExpressionStart,
 } from './mdxEsm.js';
 import { findMdxJsxEnd, isMdxJsxStartCandidate } from './mdxJsx.js';
-import { findMarkdownTableBlock, parsePipedRow } from './tableRows.js';
+import {
+  findMarkdownTableBlock,
+  isPotentialMarkdownDelimiterLine,
+  parsePipedRow,
+} from './tableRows.js';
 
 const MARKDOWN_TAB_WIDTH = 4;
 const MARKDOWN_TABLE_FENCE_LANGUAGES = [
@@ -87,6 +91,7 @@ type ParsedContainerLine = {
   readonly content: string;
   readonly contentStart: number;
   readonly key: ContainerKey;
+  /** Whether parsing consumed a list marker from the container prefix. */
   readonly startsListItem: boolean;
 };
 
@@ -702,7 +707,10 @@ export function parseContainerLine(line: string): ParsedContainerLine {
   };
 }
 
-function parseContinuationContainerLine(line: string): ContainerLine {
+/** Strips blockquote prefixes while retaining list markers and indentation in the content. */
+export function parseContinuationContainerLine(
+  line: string,
+): ParsedContainerLine {
   const parts: Array<string> = [];
   let offset = 0;
 
@@ -719,7 +727,9 @@ function parseContinuationContainerLine(line: string): ContainerLine {
 
   return {
     content: line.slice(offset),
+    contentStart: offset,
     key: toContainerKey(parts.join('/')),
+    startsListItem: false,
   };
 }
 
@@ -767,6 +777,11 @@ function parseContainerBlockquoteEnd(
   }
 
   return end;
+}
+
+/** Bullet lists and ordered lists starting at one can interrupt a paragraph. */
+export function canListItemInterruptParagraph(line: string): boolean {
+  return /^[ \t]*(?:[-+*]|1[.)])[ \t]+/.test(line);
 }
 
 function parseContainerListItemEnd(
@@ -838,6 +853,7 @@ function findPrettierIgnoredRanges(
 ): ReadonlyArray<ProtectedLineRange> {
   const ranges: Array<ProtectedLineRange> = [];
   const ignoredProtectedLines = [...protectedLines];
+  let listParentContentIndents: ReadonlyArray<MarkdownColumn> | undefined;
 
   for (let index = 0; index < context.lines.length; index++) {
     if (ignoredProtectedLines[index] === true) {
@@ -850,13 +866,17 @@ function findPrettierIgnoredRanges(
       containerKey === ROOT_CONTAINER_KEY ? undefined : containerKey;
 
     if (directive === 'next') {
+      listParentContentIndents ??= findListParentContentIndents(
+        context,
+        protectedLines,
+      );
       const ignoredRanges = [
         createProtectedLineRange(index, index),
-        ...findNextIgnoredTableRanges(
+        ...findNextIgnoredBlockRanges(
           context,
-          ignoredProtectedLines,
           index + 1,
           ignoredContainerKey,
+          listParentContentIndents,
         ),
       ];
 
@@ -890,11 +910,11 @@ function findPrettierIgnoredRanges(
   return ranges;
 }
 
-function findNextIgnoredTableRanges(
+function findNextIgnoredBlockRanges(
   context: ProtectedLineContext,
-  protectedLines: ReadonlyArray<boolean>,
   start: number,
   containerKey: ContainerKey | undefined,
+  listParentContentIndents: ReadonlyArray<MarkdownColumn>,
 ): ReadonlyArray<ProtectedLineRange> {
   const blockStart = findNextNonBlankLine(
     context.scanContents,
@@ -903,45 +923,23 @@ function findNextIgnoredTableRanges(
     containerKey,
   );
 
-  if (blockStart === undefined) {
+  if (
+    blockStart === undefined ||
+    parsePrettierIgnoreDirective(context.scanContents[blockStart]) !== undefined
+  ) {
     return [];
   }
 
-  return findTablesInsideIgnoredBlockRanges(
-    context.scanDetectionLines,
-    protectedLines,
-    blockStart,
-    findIgnoredMarkdownBlockEnd(context.scanDetectionLines, blockStart),
-  );
-}
-
-function findTablesInsideIgnoredBlockRanges(
-  lines: ReadonlyArray<string>,
-  protectedLines: ReadonlyArray<boolean>,
-  start: number,
-  end: number,
-): ReadonlyArray<ProtectedLineRange> {
-  const ranges: Array<ProtectedLineRange> = [];
-
-  for (let index = start; index <= end; index++) {
-    if (protectedLines[index] === true || index + 1 > end) {
-      continue;
-    }
-
-    const tableBlock = findMarkdownTableBlock(lines, toLineIndex(index), {
-      end: toLineIndex(end),
-      protectedLines,
-    });
-
-    if (tableBlock === undefined) {
-      continue;
-    }
-
-    ranges.push(createProtectedLineRange(index, tableBlock.end));
-    index = tableBlock.end;
-  }
-
-  return ranges;
+  return [
+    createProtectedLineRange(
+      blockStart,
+      findIgnoredMarkdownBlockEnd(
+        context.scanDetectionLines,
+        blockStart,
+        listParentContentIndents[blockStart] ?? toMarkdownColumn(0),
+      ),
+    ),
+  ];
 }
 
 /** Reads a standalone Prettier ignore directive from container content. */
@@ -1045,6 +1043,7 @@ function findNextNonBlankLine(
 function findIgnoredMarkdownBlockEnd(
   lines: ReadonlyArray<string>,
   start: number,
+  parentContentIndent: MarkdownColumn,
 ): number {
   const tableBlock = findMarkdownTableBlock(lines, toLineIndex(start));
 
@@ -1055,7 +1054,7 @@ function findIgnoredMarkdownBlockEnd(
   const listItem = parseListItemStart(lines[start]);
 
   if (listItem !== undefined && listItem.markerIndent <= 3) {
-    return findListItemBlockEnd(lines, start, listItem);
+    return findListBlockEnd(lines, start, listItem, parentContentIndent);
   }
 
   if (isBlockquoteLine(lines[start])) {
@@ -1074,7 +1073,8 @@ function parseListItemStart(
 
   const indent = scanMarkdownIndent(line);
 
-  const marker = /^(?:[-+*]|\d{1,9}[.)])(?:[ \t]+|$)/.exec(
+  // Use CommonMark list padding: one tab, up to four spaces, or one space before indented code.
+  const marker = /^(?:[-+*]|\d{1,9}[.)])(?: {1,4}(?! )| |\t|$)/.exec(
     line.slice(indent.offset),
   )?.[0];
 
@@ -1083,19 +1083,33 @@ function parseListItemStart(
   }
 
   const contentOffset = indent.offset + marker.length;
+  const markerStyle = marker.trimEnd().slice(-1);
+
+  if (
+    markerStyle !== '-' &&
+    markerStyle !== '+' &&
+    markerStyle !== '*' &&
+    markerStyle !== '.' &&
+    markerStyle !== ')'
+  ) {
+    return undefined;
+  }
 
   return {
     contentIndent: countMarkdownColumns(line, contentOffset),
+    marker: markerStyle,
     markerIndent: indent.column,
   };
 }
 
-function findListItemBlockEnd(
+function findListBlockEnd(
   lines: ReadonlyArray<string>,
   start: number,
   listItem: ListItemStart,
+  parentContentIndent: MarkdownColumn,
 ): number {
   let end = start;
+  let currentItem = listItem;
 
   for (let index = start + 1; index < lines.length; index++) {
     const line = lines[index];
@@ -1106,15 +1120,129 @@ function findListItemBlockEnd(
 
     if (
       line.trim() !== '' &&
-      scanMarkdownIndent(line).column < listItem.contentIndent
+      scanMarkdownIndent(line).column < currentItem.contentIndent
     ) {
-      break;
+      const sibling = parseListItemStart(line);
+
+      if (sibling === undefined) {
+        if (
+          !isLazyListContinuation(line, lines[index - 1], parentContentIndent)
+        ) {
+          break;
+        }
+
+        end = index;
+        continue;
+      }
+
+      if (
+        sibling.marker !== listItem.marker ||
+        sibling.markerIndent < parentContentIndent ||
+        sibling.markerIndent > 3 ||
+        isThematicBreak(line)
+      ) {
+        break;
+      }
+
+      currentItem = sibling;
     }
 
     end = index;
   }
 
   return end;
+}
+
+// Prettier keeps unindented continuation text until a blank line or a list-interrupting block.
+function isLazyListContinuation(
+  line: string,
+  previousLine: string | undefined,
+  parentContentIndent: MarkdownColumn,
+): boolean {
+  if (previousLine === undefined || previousLine.trim() === '') {
+    return false;
+  }
+
+  const content =
+    parentContentIndent === 0
+      ? line
+      : line.slice(findOffsetAfterMarkdownColumns(line, parentContentIndent));
+  const indent = scanMarkdownIndent(content);
+
+  if (indent.column > 3) {
+    return true;
+  }
+
+  return (
+    !/^#{1,6}(?:[ \t]+|$)/.test(content.slice(indent.offset)) &&
+    parseFenceStart(content) === undefined &&
+    !isThematicBreak(content)
+  );
+}
+
+// Track the containing item so an ignored nested list cannot swallow its parent's siblings.
+function findListParentContentIndents(
+  context: ProtectedLineContext,
+  protectedLines: ReadonlyArray<boolean>,
+): ReadonlyArray<MarkdownColumn> {
+  const lines = context.scanDetectionLines;
+  const containerLines = lines.map(parseContinuationContainerLine);
+  const parentProtectedLines = markProtectedRanges(
+    lines.length,
+    findFrontMatterProtectedRanges(context),
+  );
+  // List-shaped text inside comments or code blocks must not change their container.
+  applyProtectedRanges(
+    parentProtectedLines,
+    findStructuralProtectedRanges(
+      {
+        ...context,
+        scanContents: containerLines.map(({ content }) => content),
+        scanKeys: containerLines.map(({ key }) => key),
+      },
+      parentProtectedLines,
+    ),
+  );
+  const activeListItems: Array<ListItemStart> = [];
+  const parentContentIndents: Array<MarkdownColumn> = [];
+
+  for (const [index, line] of lines.entries()) {
+    if (line.trim() !== '') {
+      removeClosedListItems(activeListItems, scanMarkdownIndent(line).column);
+    }
+
+    parentContentIndents.push(
+      activeListItems[activeListItems.length - 1]?.contentIndent ??
+        toMarkdownColumn(0),
+    );
+
+    if (
+      protectedLines[index] === true ||
+      parentProtectedLines[index] === true ||
+      isPotentialMarkdownDelimiterLine(line) ||
+      isThematicBreak(line)
+    ) {
+      continue;
+    }
+
+    const listItem = parseListItemStart(line);
+
+    if (
+      listItem !== undefined &&
+      isListItemInActiveFlow(activeListItems, listItem)
+    ) {
+      activeListItems.push(listItem);
+    }
+  }
+
+  return parentContentIndents;
+}
+
+/** Recognizes horizontal rules made from at least three matching dashes, asterisks, or underscores. */
+export function isThematicBreak(line: string | undefined): boolean {
+  return /^(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/.test(
+    line?.trim() ?? '',
+  );
 }
 
 function findBlockquoteBlockEnd(

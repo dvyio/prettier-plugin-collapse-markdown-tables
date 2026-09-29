@@ -32,6 +32,7 @@ const STRICT_LARGE_PLUGIN_FORMAT_TIMEOUT_MS = 10_000;
 const CATASTROPHIC_LARGE_PLUGIN_FORMAT_TIMEOUT_MS = 30_000;
 const CATASTROPHIC_LARGE_PLUGIN_TEST_TIMEOUT_MS = 90_000;
 const STRICT_LARGE_NO_PIPE_PLUGIN_FORMAT_TIMEOUT_MS = 5_000;
+const STRICT_MISMATCHED_SEPARATOR_FORMAT_TIMEOUT_MS = 5_000;
 const CATASTROPHIC_LARGE_NO_PIPE_PLUGIN_FORMAT_TIMEOUT_MS = 15_000;
 const STRICT_WIDE_CURSOR_MAPPING_TIMEOUT_MS = 5_000;
 const CATASTROPHIC_WIDE_CURSOR_MAPPING_TIMEOUT_MS = 20_000;
@@ -434,6 +435,87 @@ describe('prettier plugin', () => {
           table?.rows.map((row) => row.length),
           label,
         ).toEqual([3, 3]);
+      }
+    }
+  });
+
+  test.each([
+    {
+      label: 'plain short separators',
+      source: [
+        'Notes:',
+        'use `a|b` | or c',
+        '-|-|-',
+        'then `d|e` | f',
+        '',
+      ].join('\n'),
+    },
+    {
+      label: 'aligned short separators',
+      source: ['intro', 'a | `x|y`', ':- | -: | -', 'then `d|e` | f', ''].join(
+        '\n',
+      ),
+    },
+  ])(
+    'given a paragraph with $label, when formatting, then preserves Prettier output exactly',
+    async ({ source }) => {
+      for (const parser of ['markdown', 'mdx', 'remark'] as const) {
+        const expected = await prettier.format(source, { parser });
+
+        for (const markdownTableStyle of ['spaced', 'compact'] as const) {
+          const options = { markdownTableStyle, parser, plugins: [plugin] };
+          const formatted = await prettier.format(source, options);
+          const label = `${parser} ${markdownTableStyle}`;
+
+          expect(formatted, label).toBe(expected);
+          expect(await prettier.format(formatted, options), label).toBe(
+            formatted,
+          );
+        }
+      }
+    },
+  );
+
+  test('given a wrapped paragraph beside a widened table, when repairing the table, then leaves paragraph code pipes unchanged', async () => {
+    const paragraph = [
+      'Notes:',
+      'Intro extra | words a | `x|y`  ',
+      ':- | -:  ',
+      'then d | e',
+      '',
+    ].join('\n');
+    const widenedTable = [
+      '| ID | Note |',
+      '| --- | --- | --- |',
+      '| one | `p | q` |',
+      '',
+    ].join('\n');
+
+    for (const parser of ['markdown', 'mdx', 'remark'] as const) {
+      const prettierOptions = {
+        parser,
+        printWidth: 20,
+        proseWrap: 'always',
+      } as const;
+      const expectedParagraph = await prettier.format(
+        paragraph,
+        prettierOptions,
+      );
+
+      for (const markdownTableStyle of ['spaced', 'compact'] as const) {
+        const options = {
+          ...prettierOptions,
+          markdownTableStyle,
+          plugins: [plugin],
+        };
+        const formatted = await prettier.format(
+          `${paragraph}\n${widenedTable}`,
+          options,
+        );
+        const expectedTable = await prettier.format(widenedTable, options);
+        const label = `${parser} ${markdownTableStyle}`;
+
+        expect(formatted, label).toBe(`${expectedParagraph}\n${expectedTable}`);
       }
     }
   });
@@ -900,6 +982,46 @@ describe('prettier plugin', () => {
       ),
     );
   });
+
+  test.each(['Builder', '`left|right`'])(
+    'given an isolated short-separator table with cell "%s", when formatting, then preserves cell contents on the first pass and stays stable',
+    async (cell) => {
+      for (const parser of ['markdown', 'mdx', 'remark'] as const) {
+        for (const markdownTableStyle of [
+          'spaced',
+          'compact',
+          'prettier',
+        ] as const) {
+          for (const outerPipe of ['', '|']) {
+            for (const separator of ['-', '--', ':-', '-:']) {
+              const source = [
+                `${outerPipe} Value | Note ${outerPipe}`,
+                `${outerPipe} ${separator} | ${separator} ${outerPipe}`,
+                `${outerPipe} ${cell} | kept ${outerPipe}`,
+                '',
+              ].join('\n');
+              const options = { markdownTableStyle, parser, plugins: [plugin] };
+              const validSource = source.replace(
+                '`left|right`',
+                '`left\\|right`',
+              );
+              const builtin = await prettier.format(validSource, { parser });
+              const expected = normalizeMarkdownTables(builtin, {
+                markdownTableStyle,
+              });
+              const formatted = await prettier.format(source, options);
+              const label = `${parser} ${markdownTableStyle}\n${source}`;
+
+              expect(formatted, label).toBe(expected);
+              expect(await prettier.format(formatted, options), label).toBe(
+                formatted,
+              );
+            }
+          }
+        }
+      }
+    },
+  );
 
   test('given a bare GFM table, when formatting by default, then writes a spaced pipe table', async () => {
     const bareTable = [
@@ -4758,6 +4880,37 @@ describe('prettier plugin', () => {
       expect(pluginOutput).toContain(
         '| BIOQ-3299 | Retired `G-15\\|3299`, kept `G-16\\|3299`, and moved `G-23\\|3299` | [ ] |',
       );
+    },
+    LARGE_PLUGIN_TEST_TIMEOUT_MS,
+  );
+
+  test.each(['-', '---'])(
+    'given thousands of mismatched "%s" separator rows, when formatting, then scanning stays fast and preserves following tables',
+    async (separator) => {
+      const rows = Array.from({ length: 8_000 }, (_, index) =>
+        Array.from({ length: 2 + (index % 2) }, () => separator).join('|'),
+      );
+      const source = [
+        '`keep|this`',
+        '',
+        ...rows,
+        '',
+        '| Name | Note |',
+        '| --- | --- |',
+        '| one | `a|b` |',
+        '',
+      ].join('\n');
+      const pluginOutput = await expectFastPluginFormat(
+        source,
+        'markdown',
+        STRICT_MISMATCHED_SEPARATOR_FORMAT_TIMEOUT_MS,
+      );
+      const prettierOutput = await prettier.format(
+        source.replace('`a|b`', '`a\\|b`'),
+        { parser: 'markdown' },
+      );
+
+      expect(pluginOutput).toBe(normalizeMarkdownTables(prettierOutput));
     },
     LARGE_PLUGIN_TEST_TIMEOUT_MS,
   );

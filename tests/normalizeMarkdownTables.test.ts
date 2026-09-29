@@ -5468,6 +5468,41 @@ describe('normalizeMarkdownTables', () => {
     );
   });
 
+  test('given consecutive ignore directives before a padded table, when normalizing, then leaves the input byte-for-byte unchanged', () => {
+    for (const { directive, enableMdxJsx } of [
+      { directive: '<!-- prettier-ignore -->', enableMdxJsx: false },
+      { directive: '{/* prettier-ignore */}', enableMdxJsx: true },
+    ]) {
+      for (const nextDirective of [
+        directive,
+        directive.replace('prettier-ignore', 'prettier-ignore-start'),
+      ]) {
+        const source = [
+          directive,
+          nextDirective,
+          '',
+          '| Name     | Note      |',
+          '| -------- | --------- |',
+          '| one      | two       |',
+          '',
+          directive.replace('prettier-ignore', 'prettier-ignore-end'),
+          '',
+        ].join('\n');
+
+        for (const markdownTableStyle of ['spaced', 'compact'] as const) {
+          expect(
+            normalizeMarkdownTables(source, {
+              enableMdxEsm: enableMdxJsx,
+              enableMdxJsx,
+              markdownTableStyle,
+            }),
+            `${markdownTableStyle}\n${source}`,
+          ).toBe(source);
+        }
+      }
+    }
+  });
+
   test('given prettier-ignore overlaps HTML comment syntax, when normalizing, then ignore detection protects the next table', () => {
     const markdown = [
       '<!-- prettier-ignore -->',
@@ -5532,6 +5567,419 @@ describe('normalizeMarkdownTables', () => {
         '| Davey | Builder |',
       ].join('\n'),
     );
+  });
+
+  test('given an ignored list has tables in multiple items, when normalizing, then leaves every ignored table byte-for-byte unchanged', () => {
+    for (const { directive, enableMdxJsx } of [
+      { directive: '<!-- prettier-ignore -->', enableMdxJsx: false },
+      { directive: '{/* prettier-ignore */}', enableMdxJsx: true },
+    ]) {
+      for (const [firstMarker, secondMarker] of [
+        ['-', '-'],
+        ['-', ' -'],
+        [' -', '-'],
+        ['-', '  -'],
+        ['+', '+'],
+        ['*', '*'],
+        ['9.', '10.'],
+        ['10)', '2)'],
+      ] as const) {
+        const source = [
+          directive,
+          ...[firstMarker, secondMarker].flatMap((marker, index) => {
+            const indent = ' '.repeat(marker.length + 1);
+
+            return [
+              `${marker} Item ${String(index)}`,
+              `${indent}| Name     | Note      |`,
+              `${indent}| -------- | --------- |`,
+              `${indent}| one      | two       |`,
+              '',
+            ];
+          }),
+        ].join('\n');
+
+        for (const markdownTableStyle of ['spaced', 'compact'] as const) {
+          expect(
+            normalizeMarkdownTables(source, {
+              enableMdxEsm: enableMdxJsx,
+              enableMdxJsx,
+              markdownTableStyle,
+            }),
+            `${markdownTableStyle}\n${source}`,
+          ).toBe(source);
+        }
+      }
+    }
+  });
+
+  test('given an ignored list starts with lazy paragraph lines, when a later item has a table, then preserves the whole list', () => {
+    for (const { directive, enableMdxJsx } of [
+      { directive: '<!-- prettier-ignore -->', enableMdxJsx: false },
+      { directive: '{/* prettier-ignore */}', enableMdxJsx: true },
+    ]) {
+      for (const [firstMarker, secondMarker] of [
+        ['-', '-'],
+        ['1.', '2.'],
+      ] as const) {
+        for (const continuation of ['bar', 'bar\nbaz']) {
+          const indent = ' '.repeat(secondMarker.length + 1);
+          const source = [
+            directive,
+            `${firstMarker} foo`,
+            continuation,
+            `${secondMarker} item`,
+            '',
+            `${indent}| a   | b   |`,
+            `${indent}| --- | --- |`,
+            '',
+          ].join('\n');
+
+          for (const markdownTableStyle of ['spaced', 'compact'] as const) {
+            expect(
+              normalizeMarkdownTables(source, {
+                enableMdxEsm: enableMdxJsx,
+                enableMdxJsx,
+                markdownTableStyle,
+              }),
+              `${markdownTableStyle}\n${source}`,
+            ).toBe(source);
+          }
+        }
+      }
+    }
+  });
+
+  test('given an ignored item contains another block, when lazy text follows without a blank line, then later items remain ignored', () => {
+    for (const firstItem of [
+      '- # Heading',
+      '- ```text\n  code\n  ```',
+      '- | a | b |\n  | --- | --- |\n  | one | two |',
+    ]) {
+      const source = [
+        '<!-- prettier-ignore -->',
+        firstItem,
+        'bar',
+        '- item',
+        '',
+        '  | a   | b   |',
+        '  | --- | --- |',
+        '',
+      ].join('\n');
+
+      expect(normalizeMarkdownTables(source), source).toBe(source);
+    }
+  });
+
+  test('given an ignored list is followed by a block boundary, when a later list has a table, then that table still collapses', () => {
+    for (const { directive, enableMdxJsx } of [
+      { directive: '<!-- prettier-ignore -->', enableMdxJsx: false },
+      { directive: '{/* prettier-ignore */}', enableMdxJsx: true },
+    ]) {
+      for (const boundary of [
+        '\nbar',
+        '# Heading',
+        '```text\ncode\n```',
+        '~~~text\ncode\n~~~',
+        '---',
+        '- - -',
+        '1. ordered',
+        '2. ordered',
+      ]) {
+        const prefix = [directive, '- foo', boundary, '', '- item', ''];
+        const source = [
+          ...prefix,
+          '  | a   | b   |',
+          '  | --- | --- |',
+          '',
+        ].join('\n');
+        const expected = [...prefix, '  | a | b |', '  | --- | --- |', ''].join(
+          '\n',
+        );
+
+        expect(
+          normalizeMarkdownTables(source, {
+            enableMdxEsm: enableMdxJsx,
+            enableMdxJsx,
+          }),
+          source,
+        ).toBe(expected);
+      }
+    }
+  });
+
+  test('given an ignore directive before a nested list, when a parent sibling has a table, then collapses only that table', () => {
+    for (const { directive, enableMdxJsx } of [
+      { directive: '<!-- prettier-ignore -->', enableMdxJsx: false },
+      { directive: '{/* prettier-ignore */}', enableMdxJsx: true },
+    ]) {
+      for (const [parentMarker, parentSibling] of [
+        ['-', '-'],
+        ['1.', '2.'],
+      ] as const) {
+        for (const [nestedMarker, nestedSibling] of [
+          ['-', '-'],
+          ['1.', '2.'],
+        ] as const) {
+          const indent = ' '.repeat(parentMarker.length + 1);
+          const tableIndent = indent + ' '.repeat(nestedSibling.length + 1);
+          const prefix = [
+            `${parentMarker} item`,
+            '',
+            `${indent}${directive}`,
+            `${indent}${nestedMarker} x`,
+            `${indent}${nestedSibling} y`,
+            '',
+            `${tableIndent}| Keep   | Ignored |`,
+            `${tableIndent}| ------ | ------- |`,
+            '',
+            `${parentSibling} sibling`,
+            '',
+          ];
+          const source = [
+            ...prefix,
+            `${indent}| a   | b   |`,
+            `${indent}| --- | --- |`,
+            '',
+          ].join('\n');
+
+          for (const markdownTableStyle of ['spaced', 'compact'] as const) {
+            const expected = [
+              ...prefix,
+              `${indent}${markdownTableStyle === 'spaced' ? '| a | b |' : '|a|b|'}`,
+              `${indent}${markdownTableStyle === 'spaced' ? '| --- | --- |' : '|---|---|'}`,
+              '',
+            ].join('\n');
+
+            expect(
+              normalizeMarkdownTables(source, {
+                enableMdxEsm: enableMdxJsx,
+                enableMdxJsx,
+                markdownTableStyle,
+              }),
+              `${markdownTableStyle}\n${source}`,
+            ).toBe(expected);
+          }
+        }
+      }
+    }
+  });
+
+  test('given earlier blocks contain list markers, when ignoring a later root list, then preserves all its siblings', () => {
+    for (const introduction of [
+      '- previous\n\n> quote',
+      '<!--\n- example\n  -->',
+      '```text\n- example\n  ```',
+      'A | B\n- | -',
+      '- - -',
+    ]) {
+      const source = [
+        introduction,
+        '',
+        '  <!-- prettier-ignore -->',
+        '  - first',
+        '',
+        '    | Keep   | Ignored |',
+        '    | ------ | ------- |',
+        '',
+        '- second',
+        '',
+        '  | Keep   | Ignored |',
+        '  | ------ | ------- |',
+        '',
+      ].join('\n');
+
+      expect(normalizeMarkdownTables(source), source).toBe(source);
+    }
+  });
+
+  test('given an ignored list item starts with indented code, when normalizing, then preserves its following table', () => {
+    for (const { directive, enableMdxJsx } of [
+      { directive: '<!-- prettier-ignore -->', enableMdxJsx: false },
+      { directive: '{/* prettier-ignore */}', enableMdxJsx: true },
+    ]) {
+      for (const marker of ['-', '1.']) {
+        const indent = ' '.repeat(marker.length + 1);
+        const source = [
+          directive,
+          `${marker} First`,
+          '',
+          `${marker}     code`,
+          '',
+          `${indent}| Name     | Note      |`,
+          `${indent}| -------- | --------- |`,
+          `${indent}| one      | two       |`,
+          '',
+        ].join('\n');
+
+        expect(
+          normalizeMarkdownTables(source, {
+            enableMdxEsm: enableMdxJsx,
+            enableMdxJsx,
+          }),
+          source,
+        ).toBe(source);
+      }
+    }
+  });
+
+  test('given spaces and tabs after an ignored sibling marker, when normalizing, then respects list and code block boundaries', () => {
+    for (const { directive, enableMdxJsx } of [
+      { directive: '<!-- prettier-ignore -->', enableMdxJsx: false },
+      { directive: '{/* prettier-ignore */}', enableMdxJsx: true },
+    ]) {
+      for (const [marker, padding, contentIndent] of [
+        ['-', '    ', 5],
+        ['-', '     ', 2],
+        ['1.', '     ', 3],
+        ['-', '\t', 4],
+        ['-', ' \t', 2],
+        ['-', '\t\t', 4],
+        ['1.', '\t', 4],
+        ['1.', ' \t', 3],
+        ['1.', '\t\t', 4],
+      ] as const) {
+        for (const tableIndent of [contentIndent - 1, contentIndent]) {
+          const indent = ' '.repeat(tableIndent);
+          const prefix = [
+            directive,
+            `${marker} First`,
+            '',
+            `${marker}${padding}code`,
+            '',
+          ];
+          const source = [
+            ...prefix,
+            `${indent}| Name     | Note      |`,
+            `${indent}| -------- | --------- |`,
+            `${indent}| one      | two       |`,
+            '',
+          ].join('\n');
+          const expected =
+            tableIndent >= contentIndent || tableIndent >= 4
+              ? source
+              : [
+                  ...prefix,
+                  `${indent}| Name | Note |`,
+                  `${indent}| --- | --- |`,
+                  `${indent}| one | two |`,
+                  '',
+                ].join('\n');
+
+          expect(
+            normalizeMarkdownTables(source, {
+              enableMdxEsm: enableMdxJsx,
+              enableMdxJsx,
+            }),
+            source,
+          ).toBe(expected);
+        }
+      }
+    }
+  });
+
+  test('given an ignored list ends before another block, when normalizing, then still collapses the following table', () => {
+    for (const { directive, enableMdxJsx } of [
+      { directive: '<!-- prettier-ignore -->', enableMdxJsx: false },
+      { directive: '{/* prettier-ignore */}', enableMdxJsx: true },
+    ]) {
+      for (const [firstMarker, followingBlock, followingIndent] of [
+        ['-', '+ Other', '  '],
+        ['-', '* Other', '  '],
+        ['-', '1. Other', '   '],
+        ['1.', '2) Other', '   '],
+        ['1)', '2. Other', '   '],
+        ['1.', '- Other', '  '],
+        ['-', '- - -', '  '],
+        ['*', '* * *', '  '],
+        ['-', '', ''],
+      ] as const) {
+        const indent = ' '.repeat(firstMarker.length + 1);
+        const ignored = [
+          directive,
+          `${firstMarker} Item`,
+          `${indent}| Name     | Note      |`,
+          `${indent}| -------- | --------- |`,
+          `${indent}| one      | two       |`,
+          '',
+          followingBlock,
+          '',
+        ].join('\n');
+        const source = [
+          ignored,
+          `${followingIndent}| After    | Table     |`,
+          `${followingIndent}| -------- | --------- |`,
+          `${followingIndent}| normal   | collapses |`,
+          '',
+        ].join('\n');
+        const expected = [
+          ignored,
+          `${followingIndent}| After | Table |`,
+          `${followingIndent}| --- | --- |`,
+          `${followingIndent}| normal | collapses |`,
+          '',
+        ].join('\n');
+
+        expect(
+          normalizeMarkdownTables(source, {
+            enableMdxEsm: enableMdxJsx,
+            enableMdxJsx,
+          }),
+          source,
+        ).toBe(expected);
+      }
+    }
+  });
+
+  test('given a sibling list item increases its content indent, when normalizing, then an outdented table is no longer ignored', () => {
+    for (const { directive, enableMdxJsx } of [
+      { directive: '<!-- prettier-ignore -->', enableMdxJsx: false },
+      { directive: '{/* prettier-ignore */}', enableMdxJsx: true },
+    ]) {
+      for (const [firstMarker, secondMarker] of [
+        ['-', ' -'],
+        ['9.', '10.'],
+      ] as const) {
+        const firstIndent = ' '.repeat(firstMarker.length + 1);
+        const secondIndent = ' '.repeat(secondMarker.length + 1);
+        const outsideIndent = ' '.repeat(secondMarker.length);
+        const ignored = [
+          directive,
+          `${firstMarker} First`,
+          `${firstIndent}| Name     | Note      |`,
+          `${firstIndent}| -------- | --------- |`,
+          `${firstIndent}| one      | two       |`,
+          '',
+          `${secondMarker} Second`,
+          `${secondIndent}| Name     | Note      |`,
+          `${secondIndent}| -------- | --------- |`,
+          `${secondIndent}| one      | two       |`,
+          '',
+        ].join('\n');
+        const source = [
+          ignored,
+          `${outsideIndent}| After    | Table     |`,
+          `${outsideIndent}| -------- | --------- |`,
+          `${outsideIndent}| normal   | collapses |`,
+          '',
+        ].join('\n');
+        const expected = [
+          ignored,
+          `${outsideIndent}| After | Table |`,
+          `${outsideIndent}| --- | --- |`,
+          `${outsideIndent}| normal | collapses |`,
+          '',
+        ].join('\n');
+
+        expect(
+          normalizeMarkdownTables(source, {
+            enableMdxEsm: enableMdxJsx,
+            enableMdxJsx,
+          }),
+          source,
+        ).toBe(expected);
+      }
+    }
   });
 
   test('given prettier-ignore before a blockquote table, when normalizing, then leaves that table unchanged', () => {

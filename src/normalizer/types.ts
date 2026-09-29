@@ -170,9 +170,10 @@ export type MarkdownIndent = {
   readonly offset: MarkdownOffset;
 };
 
-/** List marker indentation and the content column that keeps later lines inside the item. */
+/** List marker style and indentation used to track sibling items and their contents. */
 export type ListItemStart = {
   readonly contentIndent: MarkdownColumn;
+  readonly marker: '-' | '.' | ')' | '*' | '+';
   readonly markerIndent: MarkdownColumn;
 };
 
